@@ -18,7 +18,7 @@ import com.github.retrooper.packetevents.protocol.player.DiggingAction;
 import java.util.ArrayList;
 import java.util.List;
 
-@CheckData(name = "MultiActionsF", stableKey = "grim.multiactions.block_and_entity_interact", description = "Interacting with a block and an entity in the same tick", experimental = true)
+@CheckData(name = "MultiActionsF", stableKey = "grim.multiactions.block_and_entity_interact", description = "Interacting with a block and an entity in the same tick")
 public class MultiActionsF extends BlockPlaceCheck implements PacketReceiveListener, PostPredictionListener, BlockPlaceListener, BlockBreakListener {
     // Shape index == ACTION_* constant value.
     private static final Verbose V = Verbose.of("action=place").or("action=entity").or("action=dig");

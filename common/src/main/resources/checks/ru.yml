@@ -231,7 +231,7 @@ checks:
   MultiActionsE:
     enabled: true   # experimental
   MultiActionsF:
-    enabled: true   # experimental
+    enabled: true
   MultiActionsG:
     enabled: true   # experimental
 
