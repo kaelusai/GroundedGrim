@@ -1,6 +1,7 @@
 package ac.grim.grimac.predictionengine.predictions;
 
 import ac.grim.grimac.player.GrimPlayer;
+import ac.grim.grimac.predictionengine.BlockPush;
 import ac.grim.grimac.predictionengine.EntityPushSimulator;
 import ac.grim.grimac.predictionengine.SneakingEstimator;
 import ac.grim.grimac.predictionengine.UncertaintyHandler;
@@ -287,6 +288,7 @@ public class PredictionEngine {
             pointThreePossibilities.add(new VectorData(hackyClimbVector, VectorData.VectorType.ZeroPointZeroThree));
         }
 
+        applyBlockPushes(player, pointThreePossibilities, true);
         // This is a secure method to add jumping vectors to this list
         addJumpsToPossibilities(player, pointThreePossibilities);
         addExplosionToPossibilities(player, pointThreePossibilities);
@@ -344,12 +346,36 @@ public class PredictionEngine {
         addAttackSlowToPossibilities(player, velocities);
         // Non-effective AI for vehicles is done AFTER fluid pushing but BEFORE 0.003
         addNonEffectiveAI(player, velocities);
+        applyBlockPushes(player, velocities, false);
         // Attack slowing is done BEFORE 0.003! Moving this before 0.003 will cause falses!
         applyMovementThreshold(player, velocities);
         // Jumps are done after 0.003, for sure.
         addJumpsToPossibilities(player, velocities);
 
         return velocities;
+    }
+
+    public static void applyBlockPushes(GrimPlayer player, Set<VectorData> velocities, boolean keepUnpushed) {
+        Set<BlockPush> pushes = player.uncertaintyHandler.blockPushes;
+        if (pushes.isEmpty()) return;
+
+        double speed = player.getClientVersion().isOlderThan(ClientVersion.V_1_14) ? 0.1F : 0.1;
+        Set<VectorData> pushed = new HashSet<>();
+        for (VectorData data : velocities) {
+            if (keepUnpushed) pushed.add(data);
+            for (BlockPush push : pushes) {
+                if (push.isNone()) {
+                    pushed.add(data);
+                    continue;
+                }
+                Vector3dm vector = data.vector.clone();
+                if (push.x() != 0) vector.setX(speed * push.x());
+                if (push.z() != 0) vector.setZ(speed * push.z());
+                pushed.add(data.returnNewModified(vector, VectorData.VectorType.BlockPush));
+            }
+        }
+        velocities.clear();
+        velocities.addAll(pushed);
     }
 
     private void addNonEffectiveAI(GrimPlayer player, Set<VectorData> data) {

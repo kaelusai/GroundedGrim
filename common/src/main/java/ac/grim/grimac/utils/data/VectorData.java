@@ -136,7 +136,8 @@ public class VectorData {
         Flip_Sneaking,
         Flip_Use_Item,
         EntityPushing,
-        WithInput
+        WithInput,
+        BlockPush
     }
 
     public static final class MoveVectorData extends VectorData {

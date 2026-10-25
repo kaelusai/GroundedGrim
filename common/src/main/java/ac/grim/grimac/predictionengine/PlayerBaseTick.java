@@ -25,8 +25,11 @@ import com.github.retrooper.packetevents.util.Vector3d;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUpdateAttributes;
 import lombok.experimental.UtilityClass;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 
 @UtilityClass
 public final class PlayerBaseTick {
@@ -98,12 +101,8 @@ public final class PlayerBaseTick {
         if (player.inVehicle()) player.isSlowMovement = false;
 
         // Players in boats don't care about being in blocks
-        if (!player.inVehicle()) {
-            moveTowardsClosestSpace(player, player.lastX - (player.boundingBox.maxX - player.boundingBox.minX) * 0.35, player.lastZ + (player.boundingBox.maxZ - player.boundingBox.minZ) * 0.35);
-            moveTowardsClosestSpace(player, player.lastX - (player.boundingBox.maxX - player.boundingBox.minX) * 0.35, player.lastZ - (player.boundingBox.maxZ - player.boundingBox.minZ) * 0.35);
-            moveTowardsClosestSpace(player, player.lastX + (player.boundingBox.maxX - player.boundingBox.minX) * 0.35, player.lastZ - (player.boundingBox.maxZ - player.boundingBox.minZ) * 0.35);
-            moveTowardsClosestSpace(player, player.lastX + (player.boundingBox.maxX - player.boundingBox.minX) * 0.35, player.lastZ + (player.boundingBox.maxZ - player.boundingBox.minZ) * 0.35);
-        }
+        player.uncertaintyHandler.blockPushes = player.inVehicle() ? Set.of() : possibleBlockPushes(player);
+        if (!player.uncertaintyHandler.blockPushes.isEmpty()) player.pointThreeEstimator.setPushing(true);
 
         if (player.getClientVersion().isOlderThan(ClientVersion.V_1_14)) {
             updatePlayerSize(player);
@@ -281,19 +280,42 @@ public final class PlayerBaseTick {
         }
     }
 
-    private static void moveTowardsClosestSpace(GrimPlayer player, double xPosition, double zPosition) {
-        double movementThreshold = player.getMovementThreshold();
-        player.boundingBox = player.boundingBox.expand(movementThreshold, 0, movementThreshold); // 0.03... thanks mojang!
-        if (player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_14)) {
-            moveTowardsClosestSpaceModern(player, xPosition, zPosition);
-        } else {
-            moveTowardsClosestSpaceLegacy(player, xPosition, zPosition);
+    static Set<BlockPush> possibleBlockPushes(GrimPlayer player) {
+        double uncertainty = player.canSkipTicks() || !player.packetStateData.didLastMovementIncludePosition
+                ? player.getMovementThreshold() : 0;
+        if (uncertainty == 0) {
+            BlockPush push = blockPushAt(player, player.lastX, player.lastZ);
+            return push.isNone() ? Set.of() : Set.of(push);
         }
-        player.boundingBox = player.boundingBox.expand(-movementThreshold, 0, -movementThreshold);
+        Set<BlockPush> pushes = new HashSet<>();
+        for (double dx : new double[]{-uncertainty, 0, uncertainty}) {
+            for (double dz : new double[]{-uncertainty, 0, uncertainty}) {
+                pushes.add(blockPushAt(player, player.lastX + dx, player.lastZ + dz));
+            }
+        }
+        return pushes.size() == 1 && pushes.contains(BlockPush.NONE) ? Set.of() : pushes;
+    }
+
+    // Vanilla corner order; each push overwrites its axis, so the last one per axis wins
+    static BlockPush blockPushAt(GrimPlayer player, double x, double z) {
+        double offset = (player.boundingBox.maxX - player.boundingBox.minX) * 0.35;
+        boolean modern = player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_14);
+        int pushX = 0, pushZ = 0;
+        for (int corner = 0; corner < 4; corner++) {
+            double cornerX = corner < 2 ? x - offset : x + offset;
+            double cornerZ = corner == 0 || corner == 3 ? z + offset : z - offset;
+            BlockFace direction = modern ? closestSpaceModern(player, cornerX, cornerZ) : closestSpaceLegacy(player, cornerX, cornerZ);
+            if (direction == BlockFace.WEST || direction == BlockFace.EAST) {
+                pushX = direction.getModX();
+            } else if (direction != null) {
+                pushZ = direction.getModZ();
+            }
+        }
+        return new BlockPush(pushX, pushZ);
     }
 
     // Mojang is incompetent and this will push the player out a lot when using elytras
-    private static void moveTowardsClosestSpaceLegacy(GrimPlayer player, double x, double z) {
+    private static @Nullable BlockFace closestSpaceLegacy(GrimPlayer player, double x, double z) {
         int floorX = GrimMath.floor(x);
         int floorZ = GrimMath.floor(z);
         int floorY = GrimMath.floor(player.lastY + 0.5);
@@ -332,39 +354,24 @@ public final class PlayerBaseTick {
                 i = 5;
             }
 
-            if (i == 0) { // Negative X
-                player.uncertaintyHandler.xNegativeUncertainty -= 0.1;
-                player.uncertaintyHandler.xPositiveUncertainty += 0.1;
-                player.pointThreeEstimator.setPushing(true);
-            }
-
-            if (i == 1) { // Positive X
-                player.uncertaintyHandler.xNegativeUncertainty -= 0.1;
-                player.uncertaintyHandler.xPositiveUncertainty += 0.1;
-                player.pointThreeEstimator.setPushing(true);
-            }
-
-            if (i == 4) { // Negative Z
-                player.uncertaintyHandler.zNegativeUncertainty -= 0.1;
-                player.uncertaintyHandler.zPositiveUncertainty += 0.1;
-                player.pointThreeEstimator.setPushing(true);
-            }
-
-            if (i == 5) { // Positive Z
-                player.uncertaintyHandler.zNegativeUncertainty -= 0.1;
-                player.uncertaintyHandler.zPositiveUncertainty += 0.1;
-                player.pointThreeEstimator.setPushing(true);
-            }
+            return switch (i) {
+                case 0 -> BlockFace.WEST;
+                case 1 -> BlockFace.EAST;
+                case 4 -> BlockFace.NORTH;
+                case 5 -> BlockFace.SOUTH;
+                default -> null;
+            };
         }
+        return null;
     }
 
     // 1.14+
-    private static void moveTowardsClosestSpaceModern(GrimPlayer player, double xPosition, double zPosition) {
+    private static @Nullable BlockFace closestSpaceModern(GrimPlayer player, double xPosition, double zPosition) {
         int blockX = (int) Math.floor(xPosition);
         int blockZ = (int) Math.floor(zPosition);
 
         if (!suffocatesAt(player, blockX, blockZ)) {
-            return;
+            return null;
         }
 
         double relativeXMovement = xPosition - blockX;
@@ -387,17 +394,7 @@ public final class PlayerBaseTick {
             lowestValue = d6;
             direction = direction2;
         }
-        if (direction != null) {
-            if (direction == BlockFace.WEST || direction == BlockFace.EAST) {
-                player.uncertaintyHandler.xPositiveUncertainty += 0.15;
-                player.uncertaintyHandler.xNegativeUncertainty -= 0.15;
-                player.pointThreeEstimator.setPushing(true);
-            } else {
-                player.uncertaintyHandler.zPositiveUncertainty += 0.15;
-                player.uncertaintyHandler.zNegativeUncertainty -= 0.15;
-                player.pointThreeEstimator.setPushing(true);
-            }
-        }
+        return direction;
     }
 
     public static void updateInWaterStateAndDoWaterCurrentPushing(GrimPlayer player) {

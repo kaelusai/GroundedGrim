@@ -80,7 +80,7 @@ public class OffsetHandler extends Check implements PostPredictionListener {
                 }
                 case Knockback, FirstBreadKnockback, Explosion, FirstBreadExplosion, Trident, Jump,
                      Swimhop, SwimmingSpace, SlimePistonBounce, AttackSlow, ZeroPointZeroThree,
-                     Flip_Use_Item -> {
+                     Flip_Use_Item, BlockPush -> {
                     if (branch.length() > 0) branch.insert(0, " + ");
                     branch.insert(0, step.vectorType);
                 }

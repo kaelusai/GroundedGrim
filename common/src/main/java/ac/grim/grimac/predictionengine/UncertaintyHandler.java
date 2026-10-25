@@ -21,6 +21,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.List;
+import java.util.Set;
 
 public class UncertaintyHandler {
     private final GrimPlayer player;
@@ -36,6 +37,7 @@ public class UncertaintyHandler {
     public boolean isStepMovement;
     // What directions could slime block pistons be pushing the player from
     public HashSet<BlockFace> slimePistonBounces;
+    public Set<BlockPush> blockPushes = Set.of();
     // Handles general uncertainty such as entity pushing and the 1.14+ X Z collision bug where X momentum is maintained
     public double xNegativeUncertainty = 0;
     public double xPositiveUncertainty = 0;
