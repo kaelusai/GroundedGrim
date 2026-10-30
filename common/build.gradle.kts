@@ -87,11 +87,16 @@ dependencies {
     compileOnly(libs.luckperms)
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+    testImplementation(libs.packetevents.api)
+    testImplementation("org.mockito:mockito-core:5.20.0")
+    testRuntimeOnly(libs.netty)
+    testRuntimeOnly("com.google.guava:guava:33.3.1-jre")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 tasks.test {
     useJUnitPlatform()
+    jvmArgs("-DGrimPlatformOverride=BUKKIT")
 }
 
 publishing.publications.create<MavenPublication>("maven") {
