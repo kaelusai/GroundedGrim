@@ -5,6 +5,7 @@ import ac.grim.grimac.checks.CheckData;
 import ac.grim.grimac.checks.type.PreViaPacketReceiveListener;
 import ac.grim.grimac.checks.type.PreViaPacketSendListener;
 import ac.grim.grimac.player.GrimPlayer;
+import ac.grim.grimac.utils.nmsutil.SafeGameStatePacket;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
@@ -53,8 +54,8 @@ public class BadPacketsM extends Check implements PreViaPacketReceiveListener, P
         }
 
         if (event.getPacketType() == PacketType.Play.Server.CHANGE_GAME_STATE) {
-            WrapperPlayServerChangeGameState packet = new WrapperPlayServerChangeGameState(event);
-            if (packet.getReason() != WrapperPlayServerChangeGameState.Reason.WIN_GAME) return;
+            WrapperPlayServerChangeGameState packet = SafeGameStatePacket.read(event);
+            if (packet == null || packet.getReason() != WrapperPlayServerChangeGameState.Reason.WIN_GAME) return;
 
             if (packet.getValue() != 0 && packet.getValue() != 1) {
                 return; // client ignores this

@@ -4,6 +4,7 @@ import ac.grim.grimac.GrimAPI;
 import ac.grim.grimac.checks.GrimProcessor;
 import ac.grim.grimac.checks.type.PacketSendListener;
 import ac.grim.grimac.player.GrimPlayer;
+import ac.grim.grimac.utils.nmsutil.SafeGameStatePacket;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.manager.server.ServerVersion;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
@@ -20,7 +21,8 @@ public class PacketChangeGameState extends GrimProcessor implements PacketSendLi
     @Override
     public void onPacketSend(final PacketSendEvent event) {
         if (event.getPacketType() != PacketType.Play.Server.CHANGE_GAME_STATE) return;
-        WrapperPlayServerChangeGameState packet = new WrapperPlayServerChangeGameState(event);
+        WrapperPlayServerChangeGameState packet = SafeGameStatePacket.read(event);
+        if (packet == null) return;
 
         switch (packet.getReason()) {
             case CHANGE_GAME_MODE -> {

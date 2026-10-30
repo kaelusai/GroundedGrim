@@ -7,6 +7,7 @@ import ac.grim.grimac.events.packets.worldreader.multiblockchange.VersionedMulti
 import ac.grim.grimac.player.GrimPlayer;
 import ac.grim.grimac.utils.chunks.Column;
 import ac.grim.grimac.utils.data.TeleportData;
+import ac.grim.grimac.utils.nmsutil.SafeGameStatePacket;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketListenerPriority;
@@ -94,7 +95,8 @@ public class BasePacketWorldReader extends PacketListenerAbstract {
             GrimPlayer player = GrimAPI.INSTANCE.getPlayerDataManager().getPlayer(event.getUser());
             if (player == null) return;
 
-            WrapperPlayServerChangeGameState newState = new WrapperPlayServerChangeGameState(event);
+            WrapperPlayServerChangeGameState newState = SafeGameStatePacket.read(event);
+            if (newState == null) return;
 
             player.latencyUtils.addRealTimeTask(player.lastTransactionSent.get(), () -> {
                 if (newState.getReason() == WrapperPlayServerChangeGameState.Reason.BEGIN_RAINING) {
