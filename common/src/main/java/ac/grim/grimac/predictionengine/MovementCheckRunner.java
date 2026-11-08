@@ -253,7 +253,7 @@ public class MovementCheckRunner extends GrimProcessor {
 
                 if (player.isClimbing) {
                     Vector3dm ladder = player.clientVelocity.clone().setY(0.2);
-                    PredictionEngineNormal.staticVectorEndOfTick(player, ladder);
+                    PredictionEngineNormal.staticVectorEndOfTick(player, ladder, player.clientVelocity.getY());
                     player.lastWasClimbing = ladder.getY();
                 }
                 return;
@@ -402,6 +402,7 @@ public class MovementCheckRunner extends GrimProcessor {
                     player.uncertaintyHandler.isSteppingOnBouncyBlock = true;
                 }
             }
+
             if (block.getType() == StateTypes.HONEY_BLOCK) {
                 if (player.getClientVersion().isOlderThanOrEquals(ClientVersion.V_1_14)
                         && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_8)) {
@@ -411,15 +412,25 @@ public class MovementCheckRunner extends GrimProcessor {
                 }
                 player.uncertaintyHandler.isSteppingOnHoney = true;
             }
+
             if (BlockTags.BEDS.contains(block.getType()) && Math.abs((y + 0.5625D) - player.lastY) <= player.getMovementThreshold() && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_12)) {
                 player.uncertaintyHandler.isSteppingOnBouncyBlock = true;
             }
+
+            if (block.getType() == StateTypes.SHELF_MUSHROOM && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3)
+                    && (Math.abs((y + 0.6875) - player.lastY) <= player.getMovementThreshold()
+                    || Math.abs((y + (block.getAge() == 0 ? 0.5625 : 0.5)) - player.lastY) <= player.getMovementThreshold())) {
+                player.uncertaintyHandler.isSteppingOnBouncyBlock = true;
+            }
+
             if (BlockTags.ICE.contains(block.getType())) {
                 player.uncertaintyHandler.isSteppingOnIce = true;
             }
+
             if (block.getType() == StateTypes.BUBBLE_COLUMN && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_13)) {
                 player.uncertaintyHandler.isSteppingNearBubbleColumn = true;
             }
+
             if (block.getType() == StateTypes.SCAFFOLDING) {
                 player.uncertaintyHandler.isSteppingNearScaffolding = true;
             }

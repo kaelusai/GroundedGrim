@@ -67,7 +67,7 @@ dependencies {
     api(libs.snakeyaml)
     api(libs.fastutil)
     api(libs.adventure.text.minimessage)
-    api(libs.jetbrains.annotations)
+    compileOnly(libs.jetbrains.annotations)
     api(libs.hikaricp)
     runtimeOnly(libs.slf4j.jdk14)
     api(libs.grim.api)
@@ -91,6 +91,8 @@ dependencies {
     testImplementation("org.mockito:mockito-core:5.20.0")
     testRuntimeOnly(libs.netty)
     testRuntimeOnly("com.google.guava:guava:33.3.1-jre")
+    testImplementation("org.xerial:sqlite-jdbc:3.46.1.3")
+    testRuntimeOnly(libs.grim.internal.shims)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

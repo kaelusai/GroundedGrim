@@ -12,7 +12,6 @@ import ac.grim.grimac.manager.config.ChecksConfigView;
 import ac.grim.grimac.player.GrimPlayer;
 import lombok.Getter;
 import lombok.Setter;
-import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -38,9 +37,9 @@ public class Check extends GrimProcessor implements AbstractCheck {
     private final VerboseBuf verbose = VERBOSE.get();
 
     // check data
-    private final @Nullable String checkName;
-    private final @Nullable String configName;
-    private final @Nullable String alternativeName;
+    private final @NotNull String checkName;
+    private final @NotNull String configName;
+    private final @NotNull String alternativeName;
     private final @NotNull String stableKey;
     private final boolean experimental;
     private final @NotNull String defaultDescription;
@@ -52,8 +51,8 @@ public class Check extends GrimProcessor implements AbstractCheck {
     private boolean configEnabled = true;
 
     // configurable
-    private @MonotonicNonNull String displayName;
-    private @MonotonicNonNull String description;
+    private @NotNull String displayName;
+    private @NotNull String description;
     private double decay;
     private double setbackVL;
     @Setter private boolean isEnabled;
@@ -67,28 +66,21 @@ public class Check extends GrimProcessor implements AbstractCheck {
         super(player, false);
 
         final CheckData checkData = this.getClass().getAnnotation(CheckData.class);
-        if (checkData != null) {
-            this.checkName = checkData.name();
-            this.configName = checkData.configName().equals("DEFAULT")
-                    ? this.checkName
-                    : checkData.configName();
-            this.defaultDecay = checkData.decay();
-            this.defaultSetbackVL = checkData.setback();
-            this.alternativeName = checkData.alternativeName();
-            this.experimental = checkData.experimental();
-            this.defaultDescription = checkData.description();
-            this.stableKey = checkData.stableKey();
-            this.displayName = this.checkName;
-        } else {
-            this.defaultDescription = CheckData.DEFAULT_DESCRIPTION;
-            this.defaultDecay = CheckData.DEFAULT_DECAY;
-            this.defaultSetbackVL = CheckData.DEFAULT_SETBACK;
-            this.stableKey = "";
-            this.alternativeName = null;
-            this.checkName = null;
-            this.configName = null;
-            this.experimental = false;
+        if (checkData == null) {
+            throw new IllegalStateException("Check class must have @CheckData annotation. Consider using GrimProcessor instead.");
         }
+
+        this.checkName = checkData.name();
+        this.configName = checkData.configName().equals("DEFAULT")
+                ? this.checkName
+                : checkData.configName();
+        this.defaultDecay = checkData.decay();
+        this.defaultSetbackVL = checkData.setback();
+        this.alternativeName = checkData.alternativeName();
+        this.experimental = checkData.experimental();
+        this.description = this.defaultDescription = checkData.description();
+        this.stableKey = checkData.stableKey();
+        this.displayName = this.checkName;
 
         reload();
     }
@@ -111,7 +103,6 @@ public class Check extends GrimProcessor implements AbstractCheck {
     }
 
     public final void updatePermissions() {
-        if (getConfigName() == null) return;
         final String id = getConfigName().toLowerCase();
         exemptPermission = player.hasPermission("grim.exempt." + id);
         noSetbackPermission = player.hasPermission("grim.nosetback." + id);

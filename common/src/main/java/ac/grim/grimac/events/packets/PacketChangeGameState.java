@@ -11,6 +11,7 @@ import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.player.GameMode;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChangeGameState;
+import org.jetbrains.annotations.NotNull;
 
 public class PacketChangeGameState extends GrimProcessor implements PacketSendListener {
 
@@ -19,7 +20,7 @@ public class PacketChangeGameState extends GrimProcessor implements PacketSendLi
     }
 
     @Override
-    public void onPacketSend(final PacketSendEvent event) {
+    public void onPacketSend(final @NotNull PacketSendEvent event) {
         if (event.getPacketType() != PacketType.Play.Server.CHANGE_GAME_STATE) return;
         WrapperPlayServerChangeGameState packet = SafeGameStatePacket.read(event);
         if (packet == null) return;
@@ -29,7 +30,6 @@ public class PacketChangeGameState extends GrimProcessor implements PacketSendLi
                 player.sendTransaction();
 
                 player.latencyUtils.addRealTimeTask(player.lastTransactionSent.get(), () -> {
-                    // Bukkit's gamemode order is unreliable, so go from int -> packetevents -> bukkit
                     GameMode previous = player.gamemode;
                     int gamemode = (int) packet.getValue();
 

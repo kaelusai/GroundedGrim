@@ -299,7 +299,7 @@ public class GrimPlayer implements GrimUser {
     public boolean wasLastPredictionCompleteChecked;
     public boolean isJumping;
     public boolean lastJumping;
-    public final @NotNull EntityFluidInteraction fluidInteraction = new EntityFluidInteraction(FluidTag.WATER, FluidTag.LAVA);
+    public final @NotNull EntityFluidInteraction fluidInteraction = new EntityFluidInteraction(this, FluidTag.WATER, FluidTag.LAVA);
     public boolean canFloatWhileRidden;
 
     public GrimPlayer(@NotNull User user) {
@@ -593,9 +593,8 @@ public class GrimPlayer implements GrimUser {
         }
 
         if (viaPacketTracker == null && ViaVersionUtil.isAvailable) {
-            UserConnection connection = Via.getManager().getConnectionManager().getConnectedClient(uuid);
+            final UserConnection connection = getViaUserConnection();
             viaPacketTracker = connection != null ? connection.getPacketTracker() : null;
-            this.viaUserConnection = connection;
         }
 
         if (this.platformPlayer == null) {
@@ -856,9 +855,8 @@ public class GrimPlayer implements GrimUser {
         latencyUtils.addRealTimeTask(lastTransactionSent.get(), () -> {
             this.vehicleData.wasVehicleSwitch = true;
             // Pre-1.14 players desync sprinting attribute when in vehicle to be false, sprinting itself doesn't change
-            // 1.21.5 introduced this again! (only in minecarts?)
-            if (getClientVersion().isOlderThanOrEquals(ClientVersion.V_1_14) ||
-                    (getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_5) && EntityTypes.MINECART == entityType)) {
+            // 1.21.5 introduced this again! (only in dummy vehicles?)
+            if (getClientVersion().isOlderThanOrEquals(ClientVersion.V_1_14)) {
                 compensatedEntities.hasSprintingAttributeEnabled = false;
             }
         });
@@ -874,12 +872,11 @@ public class GrimPlayer implements GrimUser {
         if (getClientVersion().isOlderThan(ClientVersion.V_1_21_2)
                 || PacketEvents.getAPI().getServerManager().getVersion().isOlderThan(ServerVersion.V_1_21_2)) return false;
 
-        // PacketEvents mappings are wrong
-        return isGlider(inventory.getHelmet(), EquipmentSlot.CHEST_PLATE)
-                || isGlider(inventory.getChestplate(), EquipmentSlot.LEGGINGS)
-                || isGlider(inventory.getLeggings(), EquipmentSlot.BOOTS)
-                || isGlider(inventory.getBoots(), EquipmentSlot.OFF_HAND)
-                || isGlider(inventory.getOffHand(), EquipmentSlot.HELMET);
+        return isGlider(inventory.getHelmet(), EquipmentSlot.HELMET)
+                || isGlider(inventory.getChestplate(), EquipmentSlot.CHEST_PLATE)
+                || isGlider(inventory.getLeggings(), EquipmentSlot.LEGGINGS)
+                || isGlider(inventory.getBoots(), EquipmentSlot.BOOTS)
+                || isGlider(inventory.getOffHand(), EquipmentSlot.OFF_HAND);
     }
 
     private static boolean isGlider(ItemStack stack, EquipmentSlot slot) {
@@ -1120,13 +1117,22 @@ public class GrimPlayer implements GrimUser {
         return new Location(platformPlayer.getWorld(), this.x, this.y, this.z, this.yaw, this.pitch);
     }
 
+    // Looked up on first use, the server can send tags during configuration before pollData's first tick
+    public @Nullable UserConnection getViaUserConnection() {
+        if (this.viaUserConnection == null && ViaVersionUtil.isAvailable) {
+            this.viaUserConnection = Via.getManager().getConnectionManager().getConnectedClient(uuid);
+        }
+        return this.viaUserConnection;
+    }
+
     public int getViaTranslatedClientBlockID(int blockStateId) {
-        if (this.viaUserConnection == null) {
+        final UserConnection connection = getViaUserConnection();
+        if (connection == null) {
             return blockStateId;
         }
 
-        final ProtocolVersion clientVersion = this.viaUserConnection.getProtocolInfo().protocolVersion();
-        final ProtocolVersion serverVersion = this.viaUserConnection.getProtocolInfo().serverProtocolVersion();
+        final ProtocolVersion clientVersion = connection.getProtocolInfo().protocolVersion();
+        final ProtocolVersion serverVersion = connection.getProtocolInfo().serverProtocolVersion();
 
         final List<ProtocolPathEntry> protocolPath = Via.getManager().getProtocolManager().getProtocolPath(clientVersion, serverVersion);
         if (protocolPath == null) {

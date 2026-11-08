@@ -34,31 +34,30 @@ public class PacketPlayerAbilities extends GrimProcessor implements PacketReceiv
 
     @Override
     public void onPacketSend(PacketSendEvent event) {
-        if (event.getPacketType() == PacketType.Play.Server.PLAYER_ABILITIES) {
-            WrapperPlayServerPlayerAbilities abilities = new WrapperPlayServerPlayerAbilities(event);
-            player.sendTransaction();
+        if (event.getPacketType() != PacketType.Play.Server.PLAYER_ABILITIES) return;
 
-            if (lastSentPlayerCanFly && !abilities.isFlightAllowed()) {
-                int noFlying = player.lastTransactionSent.get();
-                if (maxFlyingPing != -1) {
-                    player.runNettyTaskInMs(() -> {
-                        if (player.lastTransactionReceived.get() < noFlying) {
-                            player.getSetbackTeleportUtil().executeViolationSetback();
-                        }
-                    }, maxFlyingPing);
-                }
+        WrapperPlayServerPlayerAbilities abilities = new WrapperPlayServerPlayerAbilities(event);
+        player.sendTransaction();
+
+        int transaction = player.lastTransactionSent.get();
+
+        if (lastSentPlayerCanFly && !abilities.isFlightAllowed()) {
+            if (maxFlyingPing != -1) {
+                player.runNettyTaskInMs(() -> {
+                    if (player.lastTransactionReceived.get() < transaction) {
+                        player.getSetbackTeleportUtil().executeViolationSetback();
+                    }
+                }, maxFlyingPing);
             }
-
-            lastSentPlayerCanFly = abilities.isFlightAllowed();
-
-            float flySpeed = abilities.getFlySpeed();
-            player.latencyUtils.addRealTimeTask(player.lastTransactionSent.get(), () -> {
-                player.canFly = abilities.isFlightAllowed();
-                player.isFlying = abilities.isFlying();
-                player.flySpeed = flySpeed;
-            });
-
         }
+
+        lastSentPlayerCanFly = abilities.isFlightAllowed();
+
+        player.latencyUtils.addRealTimeTask(transaction, () -> {
+            player.canFly = abilities.isFlightAllowed();
+            player.isFlying = abilities.isFlying();
+            player.flySpeed = abilities.getFlySpeed();
+        });
     }
 
     @Override

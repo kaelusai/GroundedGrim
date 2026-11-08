@@ -7,6 +7,7 @@ import ac.grim.grimac.checks.impl.misc.PacketLogger;
 import ac.grim.grimac.player.GrimPlayer;
 import ac.grim.grimac.platform.api.player.PlatformPlayer;
 import ac.grim.grimac.platform.api.player.PlatformPlayerCache;
+import ac.grim.grimac.utils.chunks.ChunkSectionCache;
 import ac.grim.grimac.utils.reflection.GeyserUtil;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.netty.channel.ChannelHelper;
@@ -102,7 +103,9 @@ public class PlayerDataManager {
     }
 
     public GrimPlayer remove(final @NotNull User user) {
-        return playerDataMap.remove(user);
+        GrimPlayer removed = playerDataMap.remove(user);
+        if (removed != null) ChunkSectionCache.releaseSharedSections(removed.compensatedWorld);
+        return removed;
     }
 
     public void onDisconnect(User user) {

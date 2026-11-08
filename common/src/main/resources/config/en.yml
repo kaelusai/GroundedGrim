@@ -176,6 +176,12 @@ VehicleTimer:
     # Target 1.005 timer
     setbackvl: 10
 
+FastBreak:
+    # How many milliseconds of advantage from breaking blocks too quickly before flagging
+    break-threshold: 1000
+    # How many milliseconds of advantage from starting to break a block too soon after the last one before flagging
+    delay-threshold: 1000
+
 PacketOrderI:
     # enable if players are getting flagged for using 1.7 animations mods
     exempt-placing-while-digging: false
@@ -429,6 +435,9 @@ enabled-experimental-checks:
 #  - "ElytraM"
 #  - "InventoryF"
 #  - "InventoryG"
+
+# Shares identical chunk sections between players to save memory (copy-on-write on edit).
+experimental-chunk-sharing: false
 
 reset-item-usage-on-item-update: true
 reset-item-usage-on-attack: true

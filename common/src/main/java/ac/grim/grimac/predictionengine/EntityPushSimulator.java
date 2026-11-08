@@ -81,7 +81,7 @@ public final class EntityPushSimulator {
             range.minZ += buf[2];
             range.maxZ += buf[3];
 
-            if (entity.getOldPacketLocation() != null) anySplit = true;
+            if (entity.hasUnconfirmedInterpolation()) anySplit = true;
 
             safeCount++;
         }

@@ -166,7 +166,9 @@ public class CompensatedEntities {
             return;
         }
 
-        passenger.setPositionRaw(player, riding.getPossibleLocationBoxes().offset(0, BoundingBoxSize.getMyRidingOffset(riding) + BoundingBoxSize.getPassengerRidingOffset(player, passenger), 0));
+        // TODO: is this correct?
+        double offset = BoundingBoxSize.getMyRidingOffset(passenger) + BoundingBoxSize.getPassengerRidingOffset(player, riding);
+        passenger.setPositionRaw(player, riding.getPossibleLocationBoxes().offset(0, offset, 0));
 
         for (PacketEntity passengerPassenger : passenger.passengers) {
             tickPassenger(passenger, passengerPassenger, depth + 1);
