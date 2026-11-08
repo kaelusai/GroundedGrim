@@ -21,7 +21,7 @@ on:
                 description: 'The runner to use for the build job.'
                 required: false
                 type: string
-                default: 'ix'
+                default: 'ubuntu-latest'
             refresh-gradle-cache:
                 description: 'Write a new Gradle User Home cache entry instead of using read-only ix caching.'
                 required: false
@@ -49,7 +49,7 @@ jobs:
             packages: write
         uses: ./.github/workflows/build-and-publish.yml
         with:
-            runner: ${{ github.event.inputs.runner || 'ix' }}
+            runner: ${{ github.event.inputs.runner || 'ubuntu-latest' }}
             is-release-build: false
             release-version-type: alpha # Dev builds are always 'alpha'
             run-build-scan: ${{ github.event.inputs.run-build-scan == 'true' }}

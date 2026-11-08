@@ -7,7 +7,7 @@ on:
                 description: 'The runner to use for the build job.'
                 required: false
                 type: string
-                default: 'ix'
+                default: 'ubuntu-latest'
             is-release-build:
                 description: 'True if this is a release build, which affects versioning and publishing.'
                 required: true

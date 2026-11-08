@@ -23,9 +23,7 @@ concurrency:
 
 jobs:
     build:
-        # Same-repository branches use the seeded IX machine. Forks run on a
-        # standard GitHub-hosted runner and never receive IX or repository secrets.
-        runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'ix' }}
+        runs-on: ubuntu-latest
 
         steps:
             - name: Checkout
@@ -44,8 +42,7 @@ jobs:
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v6
               with:
-                  # Pull requests and IX seed runs restore state without
-                  # uploading or requiring an encryption secret.
+                  # Validation runs do not require a cache encryption secret.
                   cache-read-only: true
 
             - name: Build
