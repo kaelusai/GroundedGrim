@@ -90,6 +90,7 @@ dependencies {
     testImplementation(libs.packetevents.api)
     testImplementation("org.mockito:mockito-core:5.20.0")
     testRuntimeOnly(libs.netty)
+    testRuntimeOnly(libs.viaversion)
     testRuntimeOnly("com.google.guava:guava:33.3.1-jre")
     testImplementation("org.xerial:sqlite-jdbc:3.46.1.3")
     testRuntimeOnly(libs.grim.internal.shims)
