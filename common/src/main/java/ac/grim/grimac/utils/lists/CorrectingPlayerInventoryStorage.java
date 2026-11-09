@@ -112,7 +112,7 @@ public class CorrectingPlayerInventoryStorage extends InventoryStorage {
 
         if (bukkitSlot != -1) {
             ItemStack existing = getItem(slot);
-            ItemStack serverside = player.platformPlayer.getInventory().getStack(bukkitSlot, slot);
+            ItemStack serverside = player.platformPlayer.getInventory().getStackForSync(bukkitSlot, slot, existing);
 
             if (existing.getType() != serverside.getType() || existing.getAmount() != serverside.getAmount()) {
                 GrimAPI.INSTANCE.getScheduler().getEntityScheduler().execute(player.platformPlayer, GrimAPI.INSTANCE.getGrimPlugin(),

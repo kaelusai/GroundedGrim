@@ -9,6 +9,11 @@ public interface PlatformInventory {
 
     ItemStack getStack(int bukkitSlot, int vanillaSlot);
 
+    /** May reuse expected when its type and count match the server slot. */
+    default ItemStack getStackForSync(int bukkitSlot, int vanillaSlot, ItemStack expected) {
+        return getStack(bukkitSlot, vanillaSlot);
+    }
+
     ItemStack getHelmet();
 
     ItemStack getChestplate();
