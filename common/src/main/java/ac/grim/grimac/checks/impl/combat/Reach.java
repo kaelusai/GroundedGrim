@@ -155,6 +155,7 @@ public class Reach extends Check implements PacketReceiveListener {
         float maxReach = 0f;
         float hitboxMargin = 0f;
         Vector3dm attackRangeMovement = null;
+        double currentMaxReach = Double.POSITIVE_INFINITY;
 
         boolean clientAttackRangeExists = player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_11);
         boolean clientAndServerAgrees = clientAttackRangeExists && ATTACK_RANGE_COMPONENT_EXISTS;
@@ -183,19 +184,14 @@ public class Reach extends Check implements PacketReceiveListener {
             // regardless of what the current stack is (No Range -> X = No Range used).
             if (startRange != null) {
                 hasRange = true;
-                if (currentRange == null) {
-                    // Range (Start) -> No Range (Current)
-                    // Client logic uses Start Range, including the attack_range movement projection.
-                    if (!clientAndViaVersion) {
-                        attackRangeMovement = player.clientVelocity.clone();
-                    }
-                    maxReach = startRange.getMaxRange();
-                    hitboxMargin = startRange.getHitboxMargin();
-                } else {
-                    // Range (Start) -> Range (Current)
-                    // Client logic requires satisfying BOTH constraints
-                    maxReach = Math.min(startRange.getMaxRange(), currentRange.getMaxRange());
-                    hitboxMargin = Math.min(startRange.getHitboxMargin(), currentRange.getHitboxMargin());
+                maxReach = startRange.getMaxRange();
+                hitboxMargin = startRange.getHitboxMargin();
+                if (!clientAndViaVersion) {
+                    attackRangeMovement = player.clientVelocity.clone();
+                }
+                if (currentRange != null) {
+                    // The current item limits the picked hit distance, without a movement allowance.
+                    currentMaxReach = currentRange.getMaxRange() + currentRange.getHitboxMargin();
                 }
             }
         }
@@ -204,12 +200,15 @@ public class Reach extends Check implements PacketReceiveListener {
         if (!tooManyAttacks) {
             playerAttackQueue.put(entityId, new InteractionData(
                     player.x, player.y, player.z,
-                    hasRange, maxReach, hitboxMargin, attackRangeMovement
+                    hasRange, maxReach, hitboxMargin, attackRangeMovement, currentMaxReach
             )); // Queue for next tick for very precise check
         }
 
         boolean canCancel = shouldModifyPackets() && cancelImpossibleHits;
-        boolean knownInvalid = attackRangeMovement == null && isKnownInvalid(entityId, entity, hasRange, maxReach, hitboxMargin, canCancel);
+        // The next look packet determines the projection, so use its upper bound for early cancellation.
+        double earlyMaxReach = Math.min(maxReach + (attackRangeMovement == null ? 0 : attackRangeMovement.length()), currentMaxReach);
+        boolean knownInvalid = (attackRangeMovement == null || Double.isFinite(currentMaxReach))
+                && isKnownInvalid(entityId, entity, hasRange, earlyMaxReach, hitboxMargin, canCancel);
 
         if ((canCancel && knownInvalid) || tooManyAttacks) {
             event.setCancelled(true);
@@ -225,7 +224,7 @@ public class Reach extends Check implements PacketReceiveListener {
     // than this method.  If this method flags, the other method WILL flag.
     //
     // Meaning that the other check should be the only one that flags.
-    private boolean isKnownInvalid(int entityId, PacketEntity reachEntity, boolean hasAttackRange, float itemMaxReach, float itemHitboxMargin, boolean canCancel) {
+    private boolean isKnownInvalid(int entityId, PacketEntity reachEntity, boolean hasAttackRange, double itemMaxReach, float itemHitboxMargin, boolean canCancel) {
         // If the entity doesn't exist, or if it is exempt, or if it is dead
         if ((blacklisted.contains(reachEntity.getType()) || !reachEntity.isLivingEntity) && reachEntity.getType() != EntityTypes.END_CRYSTAL)
             return false; // exempt
@@ -237,7 +236,7 @@ public class Reach extends Check implements PacketReceiveListener {
         double buffer = cancelBuffers.getOrDefault(entityId, 0.0);
         // Filter out what we assume to be cheats
         if (buffer != 0) {
-            CheckResult result = checkReach(entityId, reachEntity, player.x, player.y, player.z, hasAttackRange, itemMaxReach, itemHitboxMargin, null, false, true);
+            CheckResult result = checkReach(entityId, reachEntity, player.x, player.y, player.z, hasAttackRange, itemMaxReach, itemHitboxMargin, null, Double.POSITIVE_INFINITY, false, true);
             return result.isFlag(); // If they flagged
         }
 
@@ -245,7 +244,7 @@ public class Reach extends Check implements PacketReceiveListener {
         // whenever anything nearby moved - that is where it and the tick pass read opposite sides of one.
         if (cancelObstructedHits && canCancel && blocksChangedThisTick.isEmpty()
                 && (enableWallHit || enableEntityPierce)) {
-            ResultType obstruction = checkReach(entityId, reachEntity, player.x, player.y, player.z, hasAttackRange, itemMaxReach, itemHitboxMargin, null, false, false).type();
+            ResultType obstruction = checkReach(entityId, reachEntity, player.x, player.y, player.z, hasAttackRange, itemMaxReach, itemHitboxMargin, null, Double.POSITIVE_INFINITY, false, false).type();
             if (obstruction == ResultType.WALL_HIT || obstruction == ResultType.ENTITY_PIERCE) return true;
         }
 
@@ -261,7 +260,7 @@ public class Reach extends Check implements PacketReceiveListener {
 
             int entityId = attack.getIntKey();
             InteractionData interactionData = attack.getValue();
-            CheckResult result = checkReach(entityId, reachEntity, interactionData.x, interactionData.y, interactionData.z, interactionData.hasAttackRange, interactionData.maxReach, interactionData.hitboxMargin, interactionData.attackRangeMovement, false, true);
+            CheckResult result = checkReach(entityId, reachEntity, interactionData.x, interactionData.y, interactionData.z, interactionData.hasAttackRange, interactionData.maxReach, interactionData.hitboxMargin, interactionData.attackRangeMovement, interactionData.currentMaxReach, false, true);
             switch (result.type()) {
                 case REACH -> flag(
                         V.write(verbose()).f64(result.minDistance()).uint(Math.max(0, reachEntity.getType().getId(PacketEvents.getAPI().getServerManager().getVersion().toClientVersion()))),
@@ -297,11 +296,13 @@ public class Reach extends Check implements PacketReceiveListener {
     }
 
     @NotNull
-    private CheckResult checkReach(int entityId, PacketEntity reachEntity, double x, double y, double z, boolean hasAttackRange, float itemMaxReach, float itemHitboxMargin, Vector3dm attackRangeMovement, boolean isPrediction, boolean updateBuffers) {
+    private CheckResult checkReach(int entityId, PacketEntity reachEntity, double x, double y, double z, boolean hasAttackRange, double itemMaxReach, float itemHitboxMargin, Vector3dm attackRangeMovement, double currentMaxReach, boolean isPrediction, boolean updateBuffers) {
         SimpleCollisionBox targetBox = getTargetBox(reachEntity);
 
         double movementAllowance = attackRangeMovement == null ? 0 : getAttackRangeMovementAllowance(attackRangeMovement);
-        double maxReach = applyReachModifiers(targetBox, hasAttackRange, itemMaxReach, itemHitboxMargin, !player.packetStateData.didLastLastMovementIncludePosition) + movementAllowance;
+        double maxReach = Math.min(
+                applyReachModifiers(targetBox, hasAttackRange, itemMaxReach, itemHitboxMargin, !player.packetStateData.didLastLastMovementIncludePosition) + movementAllowance,
+                currentMaxReach + reachExtraExpansion);
         if (hitboxExtraExpansion > 0) targetBox.expand(hitboxExtraExpansion);
         double minDistance = Double.MAX_VALUE;
 
@@ -442,7 +443,7 @@ public class Reach extends Check implements PacketReceiveListener {
     private static final boolean ATTACK_RANGE_COMPONENT_EXISTS = PacketEvents.getAPI().getServerManager().getVersion().isNewerThanOrEquals(ServerVersion.V_1_21_11);
     private static final boolean USE_1_8_HITBOX_MARGIN = PacketEvents.getAPI().getServerManager().getVersion().isOlderThanOrEquals(ServerVersion.V_1_8_8);
 
-    private double applyReachModifiers(SimpleCollisionBox targetBox, boolean hasAttackRange, float itemMaxReach, float itemHitboxMargin, boolean giveMovementThreshold) {
+    private double applyReachModifiers(SimpleCollisionBox targetBox, boolean hasAttackRange, double itemMaxReach, float itemHitboxMargin, boolean giveMovementThreshold) {
         double maxReach;
         double hitboxMargin = threshold;
 
@@ -521,5 +522,5 @@ public class Reach extends Check implements PacketReceiveListener {
     }
 
     private record InteractionData(double x, double y, double z, boolean hasAttackRange,
-                                   float maxReach, float hitboxMargin, Vector3dm attackRangeMovement) {}
+                                   float maxReach, float hitboxMargin, Vector3dm attackRangeMovement, double currentMaxReach) {}
 }

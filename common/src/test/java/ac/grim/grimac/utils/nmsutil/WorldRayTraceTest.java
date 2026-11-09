@@ -3,6 +3,7 @@ package ac.grim.grimac.utils.nmsutil;
 import ac.grim.grimac.player.GrimPlayer;
 import ac.grim.grimac.checks.impl.combat.Reach;
 import ac.grim.grimac.manager.CheckManager;
+import ac.grim.grimac.manager.SetbackTeleportUtil;
 import ac.grim.grimac.predictionengine.PointThreeEstimator;
 import ac.grim.grimac.predictionengine.blockeffects.CompensatedGeysers;
 import ac.grim.grimac.utils.chunks.Column;
@@ -14,23 +15,31 @@ import ac.grim.grimac.utils.data.PacketStateData;
 import ac.grim.grimac.utils.data.packetentity.PacketEntity;
 import ac.grim.grimac.utils.data.packetentity.PacketEntitySelf;
 import ac.grim.grimac.utils.enums.Pose;
+import ac.grim.grimac.utils.math.TrigHandler;
 import ac.grim.grimac.utils.math.Vector3dm;
 import ac.grim.grimac.utils.latency.CompensatedEntities;
+import ac.grim.grimac.utils.latency.CompensatedInventory;
 import ac.grim.grimac.utils.latency.CompensatedWorld;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.PacketEventsAPI;
 import com.github.retrooper.packetevents.settings.PacketEventsSettings;
 import com.github.retrooper.packetevents.manager.server.ServerVersion;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
+import com.github.retrooper.packetevents.protocol.component.ComponentTypes;
+import com.github.retrooper.packetevents.protocol.component.builtin.item.ItemAttackRange;
+import com.github.retrooper.packetevents.protocol.item.ItemStack;
+import com.github.retrooper.packetevents.protocol.item.type.ItemTypes;
 import com.github.retrooper.packetevents.protocol.attribute.Attributes;
 import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
+import com.github.retrooper.packetevents.protocol.player.InteractionHand;
 import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
 import com.github.retrooper.packetevents.protocol.world.chunk.BaseChunk;
 import com.github.retrooper.packetevents.protocol.world.states.type.StateTypes;
 import com.github.retrooper.packetevents.util.Vector3d;
 import com.github.retrooper.packetevents.util.Vector3i;
+import io.github.retrooper.packetevents.impl.netty.NettyManagerImpl;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import org.junit.jupiter.api.BeforeAll;
@@ -43,6 +52,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -61,11 +71,15 @@ class WorldRayTraceTest {
     private final Map<Vector3i, WrappedBlockState> blocks = new HashMap<>();
 
     @BeforeAll
-    static void packetEvents() {
+    static void packetEvents() throws ClassNotFoundException {
         PacketEventsAPI<?> api = mock(PacketEventsAPI.class, RETURNS_DEEP_STUBS);
-        when(api.getServerManager().getVersion()).thenReturn(ServerVersion.V_1_21_4);
+        when(api.getServerManager().getVersion()).thenReturn(ServerVersion.V_1_21_11);
         when(api.getSettings()).thenReturn(new PacketEventsSettings());
+        when(api.getNettyManager()).thenReturn(new NettyManagerImpl());
         PacketEvents.setAPI(api);
+        // Reach's feature gates are fixed at startup; block fixtures use the 1.21.4 palette.
+        Class.forName(Reach.class.getName());
+        when(api.getServerManager().getVersion()).thenReturn(ServerVersion.V_1_21_4);
         EntityTypes.PLAYER.getName();
         Attributes.ENTITY_INTERACTION_RANGE.getName();
     }
@@ -267,7 +281,7 @@ class WorldRayTraceTest {
 
     private boolean knownInvalid() throws ReflectiveOperationException {
         Method check = Reach.class.getDeclaredMethod("isKnownInvalid", int.class, PacketEntity.class,
-                boolean.class, float.class, float.class, boolean.class);
+                boolean.class, double.class, float.class, boolean.class);
         check.setAccessible(true);
         return (boolean) check.invoke(reach, 1, target, false, 0f, 0f, true);
     }
@@ -298,14 +312,114 @@ class WorldRayTraceTest {
     }
 
     private String reachResult() throws ReflectiveOperationException {
+        Object result = reachMethod().invoke(reach, 1, target, -1.0, 0.0, .5, false, 0.0, 0f, null, Double.POSITIVE_INFINITY, false, true);
+        return resultType(result);
+    }
+
+    private Method reachMethod() throws NoSuchMethodException {
         Method check = Reach.class.getDeclaredMethod("checkReach", int.class, PacketEntity.class,
-                double.class, double.class, double.class, boolean.class, float.class, float.class,
-                Vector3dm.class, boolean.class, boolean.class);
+                double.class, double.class, double.class, boolean.class, double.class, float.class,
+                Vector3dm.class, double.class, boolean.class, boolean.class);
         check.setAccessible(true);
-        Object result = check.invoke(reach, 1, target, -1.0, 0.0, .5, false, 0f, 0f, null, false, true);
+        return check;
+    }
+
+    private String resultType(Object result) throws ReflectiveOperationException {
         Method type = result.getClass().getDeclaredMethod("type");
         type.setAccessible(true);
         return type.invoke(result).toString();
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "3, 5,   0,   0,  .3,  0, 3.2,  NONE,  false",
+            "3, 3.1, 0,   0,  .3,  0, 3.2,  REACH, true",
+            "3, 3.1, 0,   0,  .3,  0, 3.08, NONE,  false",
+            "3, 5,   0,   0,  .3,  0, 3.4,  REACH, true",
+            "3, 5,   0,   0,   0,  0, 3.1,  REACH, true",
+            "3, 5,   0,   0, -.3,  0, 3.2,  REACH, false",
+            "3, 5,   0,   0,   0, .3, 3.2,  REACH, false",
+            "5, 3,   0,   0,  .3,  0, 3.2,  REACH, true",
+            "3, 3,  .3,  .3,  .3,  0, 3.5,  NONE,  false",
+            "3, 3,  .3,  .3,  .3,  0, 3.65, REACH, true",
+            "3, 5,  .3,   0,   0,  0, 3.2,  NONE,  false",
+            "3, 2.9,.3,   0,  .3,  0, 3.25, REACH, true",
+            "3, 3,   0,  .3,  .3,  0, 3.2,  NONE,  false",
+            "3, 3,   0,  .3,  .3,  0, 3.4,  REACH, true",
+            "3, 5,  .3,   0,  .3,  0, 3.5,  NONE,  false",
+            "3, 3,   1,   0,   0,  0, 3.9,  NONE,  false"
+    })
+    void rangeItemChangesRespectBothRanges(float startRange, float currentRange, float startMargin, float currentMargin,
+                                          double motionX, double motionZ, double targetX, String expected, boolean cancelEarly) throws ReflectiveOperationException {
+        PacketReceiveEvent attack = rangeAttack(startRange, currentRange, startMargin, currentMargin, motionX, motionZ, targetX);
+        verify(attack, times(cancelEarly ? 1 : 0)).setCancelled(true);
+        assertEquals(expected, queuedReachResult());
+    }
+
+    @Test
+    void movementAllowanceDoesNotBypassExistingWallCancellation() throws ReflectiveOperationException {
+        block(1, 1, 0, "stone");
+        PacketReceiveEvent attack = rangeAttack(3, 5, 0, 0, .3, 0, 3.2);
+        verify(attack).setCancelled(true);
+        assertEquals("WALL_HIT", queuedReachResult());
+    }
+
+    @Test
+    void validMovementAllowanceAlsoWorksWithAnExistingCancelBuffer() throws ReflectiveOperationException {
+        Field field = findField(Reach.class, "cancelBuffers");
+        field.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<Integer, Double> buffers = (Map<Integer, Double>) field.get(reach);
+        buffers.put(1, 1.0);
+        PacketReceiveEvent attack = rangeAttack(3, 5, 0, 0, .3, 0, 3.2);
+        verify(attack, never()).setCancelled(true);
+        assertEquals("NONE", queuedReachResult());
+    }
+
+    private PacketReceiveEvent rangeAttack(float startRange, float currentRange, float startMargin, float currentMargin,
+                                          double motionX, double motionZ, double targetX) throws ReflectiveOperationException {
+        when(player.getClientVersion()).thenReturn(ClientVersion.V_1_21_11);
+        when(player.getSetbackTeleportUtil()).thenReturn(mock(SetbackTeleportUtil.class));
+        CompensatedInventory inventory = mock(CompensatedInventory.class);
+        setField(player, "inventory", inventory);
+        ItemStack start = ItemStack.builder().type(ItemTypes.STICK)
+                .component(ComponentTypes.ATTACK_RANGE, new ItemAttackRange(0, startRange, 0, startRange, startMargin, 1)).build();
+        ItemStack current = ItemStack.builder().type(ItemTypes.STICK)
+                .component(ComponentTypes.ATTACK_RANGE, new ItemAttackRange(0, currentRange, 0, currentRange, currentMargin, 1)).build();
+        when(inventory.getStartOfTickStack()).thenReturn(start);
+        when(inventory.getItemInHand(any())).thenReturn(current);
+        player.z = .5;
+        player.clientVelocity = new Vector3dm(motionX, 0, motionZ);
+        player.yaw = -90;
+        setField(player, "trigHandler", new TrigHandler(player));
+        when(player.getPossibleEyeHeights()).thenReturn(new double[]{1.4});
+        when(player.getPossibleLookVectors(false)).thenAnswer(call -> new Vector3dm[]{new Vector3dm(1, 0, 0)});
+        when(target.canHit()).thenReturn(true);
+        when(target.getPossibleCollisionBoxes()).thenAnswer(call -> new SimpleCollisionBox(targetX, 0, 0, targetX + .6, 1.8, 1));
+        player.compensatedEntities.entityMap.put(1, target);
+        doReturn(true).when(reach).shouldModifyPackets();
+        setField(reach, "cancelImpossibleHits", true);
+        PacketReceiveEvent event = mock(PacketReceiveEvent.class);
+        Method interact = Reach.class.getDeclaredMethod("onInteract", PacketReceiveEvent.class, int.class, InteractionHand.class);
+        interact.setAccessible(true);
+        interact.invoke(reach, event, 1, InteractionHand.MAIN_HAND);
+        return event;
+    }
+
+    private String queuedReachResult() throws ReflectiveOperationException {
+        Field field = findField(Reach.class, "playerAttackQueue");
+        field.setAccessible(true);
+        Object attack = ((Int2ObjectOpenHashMap<?>) field.get(reach)).get(1);
+        assertNotNull(attack);
+        List<Object> arguments = new ArrayList<>(List.of(1, target));
+        for (var component : attack.getClass().getRecordComponents()) {
+            Method accessor = component.getAccessor();
+            accessor.setAccessible(true);
+            arguments.add(accessor.invoke(attack));
+        }
+        arguments.add(false);
+        arguments.add(true);
+        return resultType(reachMethod().invoke(reach, arguments.toArray()));
     }
 
     @Test
