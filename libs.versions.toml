@@ -41,6 +41,7 @@ spotless = "8.9.0"
 # --- Core Frameworks: Adventure (Text) & Cloud (Commands) ---
 adventure-platform-bukkit = { group = "net.kyori", name = "adventure-platform-bukkit", version.ref = "adventure-platform-bukkit" }
 adventure-text-minimessage = { group = "net.kyori", name = "adventure-text-minimessage", version.ref = "adventure" }
+adventure-nbt = { group = "net.kyori", name = "adventure-nbt", version.ref = "adventure" }
 cloud-core = { group = "org.incendo", name = "cloud-core", version.ref = "cloud" }
 cloud-fabric = { group = "org.incendo", name = "cloud-fabric", version.ref = "cloud-fabric" }
 cloud-fabric-official = { group = "org.incendo", name = "cloud-fabric", version.ref = "cloud-fabric-official" }
@@ -62,6 +63,7 @@ grim-internal-shims = { group = "ac.grim.grimac", name = "grim-internal-shims", 
 grim-bukkit-internal = { group = "ac.grim.grimac", name = "grim-bukkit-internal", version.ref = "grim-api" }
 grim-fabric-internal = { group = "ac.grim.grimac", name = "grim-fabric-internal", version.ref = "grim-api" }
 packetevents-api = { group = "com.github.retrooper", name = "packetevents-api", version.ref = "packetevents" }
+packetevents-netty-common = { group = "com.github.retrooper", name = "packetevents-netty-common", version.ref = "packetevents" }
 packetevents-fabric = { group  = "com.github.retrooper", name = "packetevents-fabric", version.ref = "packetevents" }
 packetevents-fabric-common = { group = "com.github.retrooper", name = "packetevents-fabric-common", version.ref = "packetevents" }
 packetevents-spigot = { group = "com.github.retrooper", name = "packetevents-spigot", version.ref = "packetevents"}

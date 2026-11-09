@@ -130,6 +130,21 @@ dependencies {
 
     implementation(project(":common"))
     shadow(project(":common"))
+
+    testImplementation(testlibs.junitJupiter)
+    testImplementation(testlibs.mockito)
+    testImplementation(libs.paper.api)
+    testImplementation(libs.packetevents.spigot)
+    testImplementation(libs.packetevents.netty.common)
+    testRuntimeOnly(testlibs.gson)
+    testRuntimeOnly(testlibs.guava)
+    testRuntimeOnly(libs.adventure.nbt)
+    testRuntimeOnly(libs.netty)
+    testRuntimeOnly(testlibs.junitPlatformLauncher)
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 bukkit {

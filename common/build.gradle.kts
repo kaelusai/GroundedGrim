@@ -86,15 +86,18 @@ dependencies {
     compileOnly(libs.netty)
     compileOnly(libs.luckperms)
 
-    testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+    testImplementation(testlibs.junitJupiter)
     testImplementation(libs.packetevents.api)
-    testImplementation("org.mockito:mockito-core:5.20.0")
+    testImplementation(libs.packetevents.netty.common)
+    testImplementation(testlibs.mockito)
     testRuntimeOnly(libs.netty)
-    testRuntimeOnly(libs.viaversion)
-    testRuntimeOnly("com.google.guava:guava:33.3.1-jre")
     testImplementation("org.xerial:sqlite-jdbc:3.46.1.3")
     testRuntimeOnly(libs.grim.internal.shims)
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testRuntimeOnly(testlibs.guava)
+    testRuntimeOnly(testlibs.gson)
+    testRuntimeOnly(libs.adventure.nbt)
+    testRuntimeOnly(libs.viaversion)
+    testRuntimeOnly(testlibs.junitPlatformLauncher)
 }
 
 tasks.test {
