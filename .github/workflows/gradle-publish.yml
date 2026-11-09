@@ -46,6 +46,7 @@ jobs:
     call-build-workflow:
         permissions:
             contents: read
+            pull-requests: read
             packages: write
         uses: ./.github/workflows/build-and-publish.yml
         with:

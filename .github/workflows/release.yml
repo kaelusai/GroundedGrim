@@ -6,6 +6,9 @@ on:
 
 jobs:
     call-release-workflow:
+        permissions:
+            contents: read
+            pull-requests: read
         uses: ./.github/workflows/build-and-publish.yml
         with:
             runner: 'ubuntu-latest'
