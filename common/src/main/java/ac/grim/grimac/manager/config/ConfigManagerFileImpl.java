@@ -117,6 +117,13 @@ public class ConfigManagerFileImpl implements ConfigManager, BasicReloadable {
         // backups (<name>.v<oldVersion>.bak) preserve operator-rollback
         // evidence across stacked migration steps.
         runConfigUpdates();
+        try {
+            if (LightningCombatPunishments.update(getConfigFile("punishments.yml").toPath())) {
+                LogUtil.info("Added missing WallHit/EntityPierce punishment groups to punishments.yml");
+            }
+        } catch (IOException e) {
+            LogUtil.warn("Failed to add combat punishment groups: " + e);
+        }
 
         try {
             config.loadAll();
