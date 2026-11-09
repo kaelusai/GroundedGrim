@@ -2,6 +2,7 @@ package ac.grim.grimac.events.packets;
 
 import ac.grim.grimac.GrimAPI;
 import ac.grim.grimac.checks.impl.elytra.ElytraA;
+import ac.grim.grimac.checks.impl.elytra.ElytraN;
 import ac.grim.grimac.player.GrimPlayer;
 import ac.grim.grimac.utils.data.IntToObjectPair;
 import ac.grim.grimac.utils.data.SprintingState;
@@ -50,6 +51,7 @@ public class PacketEntityAction extends PacketListenerAbstract {
                 case STOP_SNEAKING -> player.isSneaking = false;
                 case START_FLYING_WITH_ELYTRA -> {
                     if (!SERVER_SUPPORTS_GLIDING) return;
+                    if (player.checkManager.get(ElytraN.class).onStartGliding(event)) return;
 
                     // Block elytra if player hasn't sent position data for 2+ ticks (1.21.2+ only)
                     // On 1.21.2+ threshold is 0.0002 so position is always sent during any movement

@@ -323,7 +323,7 @@ checks:
   ElytraM:
     enabled: true   # experimental
   ElytraN:
-    enabled: true   # experimental
+    enabled: true
   ElytraO:
     enabled: true
   ElytraP:
