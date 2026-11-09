@@ -57,7 +57,6 @@ import com.viaversion.viaversion.api.Via;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
@@ -107,9 +106,10 @@ public class Reach extends Check implements PacketReceiveListener {
         }
 
         // If the player set their look, or we know they have a new tick
-        final boolean isFlying = WrapperPlayClientPlayerFlying.isFlying(event.getPacketType());
+        final boolean endsTick = WrapperPlayClientPlayerFlying.isFlying(event.getPacketType())
+                || event.getPacketType() == PacketType.Play.Client.CLIENT_TICK_END;
         if (isUpdate(event.getPacketType())) {
-            tickBetterReachCheckWithAngle(isFlying);
+            tickBetterReachCheckWithAngle(endsTick);
         }
     }
 
@@ -254,7 +254,7 @@ public class Reach extends Check implements PacketReceiveListener {
         return ReachUtils.getMinReachToBox(player, targetBox) > maxReach;
     }
 
-    private void tickBetterReachCheckWithAngle(boolean isFlying) {
+    private void tickBetterReachCheckWithAngle(boolean endsTick) {
         for (Int2ObjectMap.Entry<InteractionData> attack : playerAttackQueue.int2ObjectEntrySet()) {
             PacketEntity reachEntity = player.compensatedEntities.entityMap.get(attack.getIntKey());
             if (reachEntity == null) continue;
@@ -293,7 +293,7 @@ public class Reach extends Check implements PacketReceiveListener {
         playerAttackQueue.clear();
         cancelBuffers.keySet().removeIf(id -> !player.compensatedEntities.entityMap.containsKey(id));
         // We can't use transactions for this because of timing issues with block changes
-        if (isFlying) blocksChangedThisTick.clear();
+        if (endsTick) blocksChangedThisTick.clear();
     }
 
     @NotNull
@@ -305,9 +305,7 @@ public class Reach extends Check implements PacketReceiveListener {
         if (hitboxExtraExpansion > 0) targetBox.expand(hitboxExtraExpansion);
         double minDistance = Double.MAX_VALUE;
 
-        // Stores look vectors and eye heights that successfully hit the target entity
-        // Used later for WallHit/EntityPierce ray trace obstruction checks
-        List<Pair<Vector3dm, Double>> lookVecsAndEyeHeights = new ArrayList<>();
+        List<WorldRayTrace.AttackRay> attackRays = new ArrayList<>();
 
         // +3 would be 3 + 3 = 6, which is the pre-1.20.5 behaviour, preventing "Missed Hitbox"
         final double distance = maxReach + extraSearchDistance;
@@ -326,12 +324,17 @@ public class Reach extends Check implements PacketReceiveListener {
 
                 if (ReachUtils.isVecInside(targetBox, eyePos)) {
                     minDistance = 0;
+                    attackRays.add(new WorldRayTrace.AttackRay(eyePos, eyePos));
                     break;
                 }
 
                 if (intercept != null) {
-                    minDistance = Math.min(eyePos.distance(intercept), minDistance);
-                    lookVecsAndEyeHeights.add(new Pair<>(lookVec, eye));
+                    double interceptDistance = eyePos.distance(intercept);
+                    minDistance = Math.min(interceptDistance, minDistance);
+                    // A clear ray beyond reach must not vouch for an obstructed one within it.
+                    if (interceptDistance <= maxReach) {
+                        attackRays.add(new WorldRayTrace.AttackRay(eyePos, intercept));
+                    }
                 }
             }
         }
@@ -342,10 +345,10 @@ public class Reach extends Check implements PacketReceiveListener {
         boolean checkWallHit = enableWallHit && (!wallHitOnlyPlayers || isTargetPlayer);
         boolean checkEntityPierce = enableEntityPierce && (!entityPierceOnlyPlayers || isTargetPlayer);
         if ((checkWallHit || checkEntityPierce)
-                && minDistance <= distance - extraSearchDistance
+                && minDistance <= maxReach
                 && !hardEntityExplains(x, y, z, targetBox, possibleEyeHeights)) {
             final double reachedDistance = minDistance;
-            final @Nullable Pair<Double, HitData> hitResult = WorldRayTrace.didRayTraceHit(player, reachEntity, lookVecsAndEyeHeights, x, y, z,
+            final Pair<Double, HitData> hitResult = WorldRayTrace.didRayTraceHit(player, reachEntity, attackRays,
                     checkWallHit ? wallHitIgnoredBlocks : null, checkWallHit ? blocksChangedThisTick : null);
             HitData hitData = hitResult.second();
             // Hit a different entity than the target (EntityPierce)

@@ -94,11 +94,12 @@ public enum HitboxData implements HitBoxFactory {
     }, StateTypes.END_PORTAL),
 
     FENCE_GATE((player, item, version, data, isTargetBlock, x, y, z) -> {
-        // This technically should be taken from the block data/made multi-version/run block updates... but that's too far even for me
-        // This way is so much easier and works unless the magic stick wand is used
         boolean isInWall;
         boolean isXAxis = data.getFacing() == BlockFace.WEST || data.getFacing() == BlockFace.EAST;
-        if (isXAxis) {
+        if (version.isNewerThanOrEquals(ClientVersion.V_1_13)
+                && PacketEvents.getAPI().getServerManager().getVersion().isNewerThanOrEquals(ServerVersion.V_1_13)) {
+            isInWall = data.isInWall();
+        } else if (isXAxis) {
             boolean zPosWall = Materials.isWall(player.compensatedWorld.getBlockType(x, y, z + 1));
             boolean zNegWall = Materials.isWall(player.compensatedWorld.getBlockType(x, y, z - 1));
             isInWall = zPosWall || zNegWall;

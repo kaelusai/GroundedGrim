@@ -330,7 +330,16 @@ public class CompensatedWorld implements PacketWorld {
                 // The method also gets called for the previous state before replacement
                 player.pointThreeEstimator.handleChangeBlock(x, y, z, previousState);
 
-                player.checkManager.get(Reach.class).handleBlockChange(new Vector3i(x, y, z));
+                Reach reach = player.checkManager.get(Reach.class);
+                reach.handleBlockChange(asVector);
+                if (blockVersion.isOlderThan(ClientVersion.V_1_13) || player.getClientVersion().isOlderThan(ClientVersion.V_1_13)) {
+                    if (BlockTags.DOORS.contains(previousState.getType())) {
+                        reach.handleBlockChange(new Vector3i(x, y + (previousState.getHalf() == Half.LOWER ? 1 : -1), z));
+                    }
+                    if (BlockTags.DOORS.contains(newState.getType())) {
+                        reach.handleBlockChange(new Vector3i(x, y + (newState.getHalf() == Half.LOWER ? 1 : -1), z));
+                    }
+                }
                 // Copy-on-write: never mutate a shared section in place
                 chunk = ChunkSectionCache.detachSectionForWrite(column, sectionIndex, chunk);
                 chunk.set(x & 0xF, offsetY & 0xF, z & 0xF, combinedID);

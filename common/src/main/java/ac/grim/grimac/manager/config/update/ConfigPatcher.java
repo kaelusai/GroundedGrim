@@ -125,6 +125,10 @@ public final class ConfigPatcher {
         }
         if (!newBlock.isEmpty()) {
             lines.addAll(blockStartLine, Arrays.asList(newBlock.split("\r?\n")));
+        } else {
+            String line = lines.get(keyPosition.lineIndex);
+            int colon = line.indexOf(':');
+            lines.set(keyPosition.lineIndex, line.substring(0, colon + 1) + " []" + line.substring(colon + 1));
         }
     }
 

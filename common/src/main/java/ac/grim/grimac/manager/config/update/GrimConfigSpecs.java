@@ -61,7 +61,7 @@ public final class GrimConfigSpecs {
      * existing value forward, so this migration writes the new default explicitly.
      */
     public static @NotNull ConfigUpdater.Spec mainConfig() {
-        return ConfigUpdater.Spec.builder("/config/", 13, ConfigUpdater.ConfigFlavor.V2)
+        return ConfigUpdater.Spec.builder("/config/", 14, ConfigUpdater.ConfigFlavor.V2)
                 .migration(10, ctx -> {
                     String typeRaw = ctx.input().getString("history.database.type");
                     String type = typeRaw == null ? null : typeRaw.trim().toUpperCase(Locale.ROOT);
@@ -104,6 +104,7 @@ public final class GrimConfigSpecs {
                     }
                 })
                 .migration(12, ctx -> ctx.output().put("WallHit.cancel-hits", true))
+                .migration(14, LegacyWallHitBlocks::migrate)
                 .build();
     }
 
