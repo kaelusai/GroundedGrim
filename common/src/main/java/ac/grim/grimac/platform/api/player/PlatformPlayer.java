@@ -32,6 +32,10 @@ public interface PlatformPlayer extends GrimEntity, OfflinePlatformPlayer {
 
     void setGameMode(GameMode gameMode);
 
+    default boolean isFlying() {
+        return false;
+    }
+
     void resetFallDistance();
 
     boolean isExternalPlayer();

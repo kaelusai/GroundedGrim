@@ -31,6 +31,11 @@ public class Fabric261PlatformPlayer extends AbstractFabricPlatformPlayer<Server
     }
 
     @Override
+    public boolean isFlying() {
+        return serverPlayer().getAbilities().flying;
+    }
+
+    @Override
     public void setGameMode(GameMode gameMode) {
         serverPlayer().setGameMode(FabricOfficialConversionUtil.toFabricGameMode(gameMode));
     }

@@ -137,6 +137,11 @@ public class BukkitPlatformPlayer extends BukkitGrimEntity implements PlatformPl
     }
 
     @Override
+    public boolean isFlying() {
+        return bukkitPlayer.isFlying();
+    }
+
+    @Override
     public void resetFallDistance() {
         bukkitPlayer.setFallDistance(0);
     }

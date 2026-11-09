@@ -6,13 +6,25 @@ import ac.grim.grimac.checks.Check;
 import ac.grim.grimac.checks.CheckData;
 import ac.grim.grimac.checks.type.PacketReceiveListener;
 import ac.grim.grimac.player.GrimPlayer;
+import ac.grim.grimac.platform.api.world.PlatformWorld;
 import ac.grim.grimac.utils.anticheat.LogUtil;
-import ac.grim.grimac.utils.math.Vector3dm;
+import ac.grim.grimac.utils.chunks.Column;
+import ac.grim.grimac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.grim.grimac.utils.math.Location;
 import ac.grim.grimac.utils.nmsutil.Collisions;
 import ac.grim.grimac.utils.nmsutil.GetBoundingBox;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.potion.PotionTypes;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying;
+import com.github.retrooper.packetevents.util.Vector3d;
+import com.github.retrooper.packetevents.util.Vector3i;
+import org.jetbrains.annotations.Nullable;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.function.BooleanSupplier;
 
 @CheckData(name = "AirStuck", description = "Checks for players freezing in air without position packets", experimental = true)
 public class AirStuck extends Check implements PacketReceiveListener {
@@ -79,107 +91,165 @@ public class AirStuck extends Check implements PacketReceiveListener {
         long now = System.currentTimeMillis();
         long elapsed = now - lastPositionTime;
 
-        if (elapsed <= maxMs || player.inVehicle()
-                || player.isFlying || player.isClimbing
-                || player.wasTouchingWater || player.wasTouchingLava
-                || player.compensatedEntities.self.isDead
-                || player.compensatedEntities.getPotionLevelForPlayer(PotionTypes.LEVITATION).isPresent()
-                || player.compensatedEntities.getPotionLevelForPlayer(PotionTypes.SLOW_FALLING).isPresent()
-                || !player.getSetbackTeleportUtil().hasAcceptedSpawnTeleport
-                || System.currentTimeMillis() - player.joinTime < 5000) {
-            return;
-        }
+        if (elapsed <= maxMs || isExempt()) return;
 
         if (now - lastSimTime < 50) return;
         lastSimTime = now;
 
         if (now - lastFlagTime < flagCooldownMs) return;
 
-        final int minY = player.compensatedWorld.getMinHeight();
-
-        double startX, startY, startZ;
-        if (player.platformPlayer != null) {
-            var pos = player.platformPlayer.getPosition();
-            startX = pos.getX();
-            startY = pos.getY();
-            startZ = pos.getZ();
-        } else {
-            startX = player.x;
-            startY = player.y;
-            startZ = player.z;
-        }
-
-        if (startY < minY + 2) return;
-
-        double simX = startX;
-        double simZ = startZ;
-        double simY = startY;
-        double simVelY = 0;
-        int simTicks = (int) Math.min(elapsed / 50L, 200L);
-
-        var oldBox = player.boundingBox;
-        double oldPlayerY = player.y;
-        boolean oldLastOnGround = player.lastOnGround;
-        boolean oldIsStepMovement = player.uncertaintyHandler.isStepMovement;
-        Vector3dm oldActualMovement = player.actualMovement;
-        player.lastOnGround = false;
-        player.actualMovement = new Vector3dm();
-
-        try {
-            for (int i = 0; i < simTicks; i++) {
-                simVelY = (simVelY - 0.08) * 0.98;
-                player.y = simY;
-                player.boundingBox = GetBoundingBox.getBoundingBoxFromPosAndSize(
-                        player, simX, simY, simZ, 0.6f, 1.8f);
-                Vector3dm collided = Collisions.collide(player, 0, simVelY, 0);
-                simY += collided.getY();
-                if (collided.getY() > simVelY + 1e-7 && simVelY < 0) break;
-                if (simY < minY) break;
-            }
-        } finally {
-            player.y = oldPlayerY;
-            player.boundingBox = oldBox;
-            player.lastOnGround = oldLastOnGround;
-            player.actualMovement = oldActualMovement;
-            player.uncertaintyHandler.isStepMovement = oldIsStepMovement;
-        }
-
-        boolean canTeleport = simY >= minY + 2
-                && simY < startY - 0.01
-                && (startY - simY) <= 256.0;
+        Vector3d landing = findLanding(maxDrop(elapsed));
 
         if (debug) {
-            LogUtil.info(String.format("[AirStuck] %s startY=%.2f simY=%.2f iters=%d canTp=%b",
-                    player.getName(), startY, simY, simTicks, canTeleport));
+            LogUtil.info(String.format("[AirStuck] %s startY=%.2f landing=%s",
+                    player.getName(), player.y, landing));
         }
 
-        // Sim couldn't move player down = already on real ground, no flag
-        if (!canTeleport || player.platformPlayer == null) return;
+        if (landing == null || player.platformPlayer == null) return;
 
-        boolean flagged = flagAndAlert("ms=" + elapsed + " y=" + String.format("%.1f", simY));
+        boolean flagged = flagAndAlert("ms=" + elapsed + " y=" + String.format("%.1f", landing.getY()));
         lastFlagTime = now;
         lastPositionTime = now;
 
-        // flag() is what knows about the experimental gate, disableGrim and the exempt permission. Teleporting
-        // on a flag that never fired means a check nobody switched on still moves players around.
-        if (!flagged || !shouldModifyPackets()) return;
+        if (!flagged || !canCorrect()) return;
+        scheduleDescent(landing, this::canCorrect, () -> {});
+    }
 
-        var world = player.platformPlayer.getWorld();
-        float yaw = player.yaw;
-        float pitch = player.pitch;
-        double finalX = simX;
-        double finalY = simY;
-        double finalZ = simZ;
+    private boolean canCorrect() {
+        return enabled && shouldModifyPackets() && !isNoSetbackPermission() && !isExempt();
+    }
+
+    private boolean isExempt() {
+        return player.inVehicle() || player.isFlying || player.isClimbing
+                || player.isGliding || player.isInBed || !player.hasGravity || player.gravity <= 0
+                || player.wasTouchingWater || player.wasTouchingLava
+                || player.compensatedEntities.self.isDead
+                || player.compensatedEntities.getPotionLevelForPlayer(PotionTypes.LEVITATION).isPresent()
+                || player.compensatedEntities.getPotionLevelForPlayer(PotionTypes.SLOW_FALLING).isPresent()
+                || !player.getSetbackTeleportUtil().hasAcceptedSpawnTeleport
+                || player.getSetbackTeleportUtil().shouldBlockMovement()
+                || System.currentTimeMillis() - player.joinTime < 5000;
+    }
+
+    public void correctElytraStall(long elapsed, BooleanSupplier shouldCorrect, Runnable onFallDistanceReset) {
+        if (player.getSetbackTeleportUtil().shouldBlockMovement()) return;
+        Vector3d destination = findDescent(maxDrop(elapsed), false);
+        if (destination != null && player.platformPlayer != null) {
+            scheduleDescent(destination, shouldCorrect, onFallDistanceReset);
+        }
+    }
+
+    public boolean hasGroundSupport() {
+        SimpleCollisionBox box = GetBoundingBox.getPlayerBoundingBox(player, player.x, player.y, player.z);
+        if (!hasAcknowledgedChunks(box)) return false;
+        List<SimpleCollisionBox> collisions = new ArrayList<>();
+        Collisions.getCollisionBoxes(player, box.copy().expandToCoordinate(0, -0.03, 0), collisions, false);
+        return collisions.stream().anyMatch(obstacle -> obstacle.collideY(box, -0.03) > -0.03);
+    }
+
+    private double maxDrop(long elapsed) {
+        double drop = 0;
+        double velocityY = 0;
+        int ticks = (int) Math.min(elapsed / 50L, 200L);
+        for (int i = 0; i < ticks; i++) {
+            velocityY = (velocityY - player.gravity) * 0.98;
+            drop -= velocityY;
+        }
+        return Math.min(drop, 256.0);
+    }
+
+    private void scheduleDescent(Vector3d landing, BooleanSupplier shouldCorrect, Runnable onFallDistanceReset) {
+        var platformPlayer = player.platformPlayer;
+        PlatformWorld world = platformPlayer.getWorld();
+        Vector3d start = new Vector3d(player.x, player.y, player.z);
+        double toleranceSquared = Math.pow(player.getMovementThreshold() + SimpleCollisionBox.COLLISION_EPSILON, 2);
+        Map<Vector3i, Integer> blocks = captureBlocks(landing);
+        Location destination = new Location(world, landing.x, landing.y, landing.z, player.yaw, player.pitch);
 
         GrimAPI.INSTANCE.getScheduler().getEntityScheduler().execute(
-                player.platformPlayer,
-                GrimAPI.INSTANCE.getGrimPlugin(),
-                () -> {
-                    player.platformPlayer.resetFallDistance();
-                    player.platformPlayer.teleportAsync(
-                            new ac.grim.grimac.utils.math.Location(
-                                    world, finalX, finalY, finalZ, yaw, pitch));
-                },
-                null, 0);
+                platformPlayer, GrimAPI.INSTANCE.getGrimPlugin(), () -> {
+                    // The server task may run after movement, a world change or a block update.
+                    if (!shouldCorrect.getAsBoolean() || platformPlayer.isDead() || platformPlayer.isFlying() || platformPlayer.getVehicle() != null
+                            || !world.equals(platformPlayer.getWorld())
+                            || start.distanceSquared(platformPlayer.getPosition()) > toleranceSquared
+                            || !matchesBlocks(world, blocks)) return;
+                    platformPlayer.resetFallDistance();
+                    onFallDistanceReset.run();
+                    platformPlayer.teleportAsync(destination);
+                }, null, 0);
+    }
+
+    @Nullable Vector3d findLanding(double maxDrop) {
+        return findDescent(maxDrop, true);
+    }
+
+    private @Nullable Vector3d findDescent(double maxDrop, boolean requireLanding) {
+        maxDrop = Math.min(maxDrop, player.y - player.compensatedWorld.getMinHeight() - 2);
+        if (!Double.isFinite(maxDrop) || maxDrop <= 0) return null;
+
+        // Use Grim's position, not the platform's: shapes come from the compensated world.
+        SimpleCollisionBox box = GetBoundingBox.getPlayerBoundingBox(player, player.x, player.y, player.z);
+        SimpleCollisionBox sweep = box.copy().expandToCoordinate(0, -maxDrop, 0);
+        if (!hasAcknowledgedChunks(sweep)) return null;
+
+        List<SimpleCollisionBox> collisions = new ArrayList<>();
+        Collisions.getCollisionBoxes(player, sweep, collisions, false);
+        Double y = findLandingY(box, maxDrop, collisions, requireLanding);
+        return y == null ? null : new Vector3d(player.x, y, player.z);
+    }
+
+    private boolean hasAcknowledgedChunks(SimpleCollisionBox box) {
+        int minChunkX = ((int) Math.floor(box.minX - SimpleCollisionBox.COLLISION_EPSILON) - 1) >> 4;
+        int maxChunkX = ((int) Math.floor(box.maxX + SimpleCollisionBox.COLLISION_EPSILON) + 1) >> 4;
+        int minChunkZ = ((int) Math.floor(box.minZ - SimpleCollisionBox.COLLISION_EPSILON) - 1) >> 4;
+        int maxChunkZ = ((int) Math.floor(box.maxZ + SimpleCollisionBox.COLLISION_EPSILON) + 1) >> 4;
+        for (int x = minChunkX; x <= maxChunkX; x++) {
+            for (int z = minChunkZ; z <= maxChunkZ; z++) {
+                Column column = player.compensatedWorld.getChunk(x, z);
+                if (column == null || column.transaction() >= player.lastTransactionReceived.get()) return false;
+            }
+        }
+
+        return true;
+    }
+
+    static @Nullable Double findLandingY(SimpleCollisionBox box, double maxDrop, List<SimpleCollisionBox> collisions) {
+        return findLandingY(box, maxDrop, collisions, true);
+    }
+
+    private static @Nullable Double findLandingY(SimpleCollisionBox box, double maxDrop, List<SimpleCollisionBox> collisions, boolean requireLanding) {
+        // collideY clips motion from outside an obstacle; it cannot recover a box already inside one.
+        if (collisions.stream().anyMatch(obstacle -> obstacle.isIntersected(box))) return null;
+        double movementY = -maxDrop;
+        for (SimpleCollisionBox obstacle : collisions) movementY = obstacle.collideY(box, movementY);
+        if ((requireLanding && movementY <= -maxDrop) || movementY >= -0.01) return null;
+        SimpleCollisionBox landing = box.copy().offset(0, movementY, 0);
+        if (collisions.stream().anyMatch(obstacle -> obstacle.isIntersected(landing))) return null;
+        return landing.minY;
+    }
+
+    private Map<Vector3i, Integer> captureBlocks(Vector3d landing) {
+        SimpleCollisionBox box = GetBoundingBox.getPlayerBoundingBox(player, player.x, player.y, player.z);
+        Map<Vector3i, Integer> blocks = new HashMap<>();
+        for (int x = (int) Math.floor(box.minX - SimpleCollisionBox.COLLISION_EPSILON) - 1;
+             x <= (int) Math.floor(box.maxX + SimpleCollisionBox.COLLISION_EPSILON) + 1; x++) {
+            for (int z = (int) Math.floor(box.minZ - SimpleCollisionBox.COLLISION_EPSILON) - 1;
+                 z <= (int) Math.floor(box.maxZ + SimpleCollisionBox.COLLISION_EPSILON) + 1; z++) {
+                for (int y = (int) Math.floor(landing.y - SimpleCollisionBox.COLLISION_EPSILON) - 1;
+                     y <= (int) Math.floor(box.maxY + SimpleCollisionBox.COLLISION_EPSILON) + 1; y++) {
+                    blocks.put(new Vector3i(x, y, z), player.compensatedWorld.getBlock(x, y, z).getGlobalId());
+                }
+            }
+        }
+        return blocks;
+    }
+
+    static boolean matchesBlocks(PlatformWorld world, Map<Vector3i, Integer> blocks) {
+        for (Map.Entry<Vector3i, Integer> entry : blocks.entrySet()) {
+            Vector3i pos = entry.getKey();
+            if (!world.isChunkLoaded(pos.x >> 4, pos.z >> 4)
+                    || world.getBlockAt(pos.x, pos.y, pos.z).getGlobalId() != entry.getValue()) return false;
+        }
+        return true;
     }
 }
