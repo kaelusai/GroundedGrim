@@ -3,14 +3,17 @@ package ac.grim.grimac.utils.latency;
 import ac.grim.grimac.player.GrimPlayer;
 import com.github.retrooper.packetevents.protocol.player.GameMode;
 
+import java.util.function.LongSupplier;
+
 public class FreezeDetector {
 
     private static final int RTT_BASELINE_SAMPLES = 20;
     private static final long JOIN_GRACE_MS = 5000;
 
     private final GrimPlayer player;
+    private final LongSupplier clock;
 
-    private volatile long lastFlyingPacketMs = System.currentTimeMillis();
+    private volatile long lastFlyingPacketMs;
     private volatile long gapStartMs = 0;
     private volatile boolean inGap = false;
     private volatile int attackPacketsDuringGap = 0;
@@ -34,7 +37,13 @@ public class FreezeDetector {
     public int postUnfreezeCooldownMs = 1500;
 
     public FreezeDetector(GrimPlayer player) {
+        this(player, System::currentTimeMillis);
+    }
+
+    FreezeDetector(GrimPlayer player, LongSupplier clock) {
         this.player = player;
+        this.clock = clock;
+        lastFlyingPacketMs = clock.getAsLong();
     }
 
     public synchronized void onFlyingPacket() {
@@ -43,7 +52,7 @@ public class FreezeDetector {
             return;
         }
 
-        long now = System.currentTimeMillis();
+        long now = clock.getAsLong();
         long gap = now - lastFlyingPacketMs;
 
         if (gap > gapThresholdMs && !inGap) {
@@ -55,7 +64,8 @@ public class FreezeDetector {
 
         if (inGap) recoveryFlyingsInGap++;
 
-        if (gap < 70) {
+        // Stationary clients can send their position heartbeat only once per second.
+        if (gap <= gapThresholdMs) {
             consecutiveNormalFlyings++;
             if (consecutiveNormalFlyings >= recoveryFlyingsRequired && inGap) {
                 lastUnfreezeMs = now;
@@ -68,6 +78,8 @@ public class FreezeDetector {
             consecutiveNormalFlyings = 0;
         }
 
+        sawInboundDuringGap = false;
+        transSentAtGapStart = player.lastTransactionSent.get();
         lastFlyingPacketMs = now;
     }
 
@@ -76,21 +88,22 @@ public class FreezeDetector {
         rttIndex = (rttIndex + 1) % RTT_BASELINE_SAMPLES;
         if (rttFilled < RTT_BASELINE_SAMPLES) rttFilled++;
 
-        // S5: a PONG answering a PING SENT during the freeze (id past the gap-start snapshot) AND landing while
-        // movement is still withheld (no flying for >gapThreshold) proves the socket is alive while position is
-        // frozen - impossible on a single in-order TCP stream for real lag (its flyings would arrive before any
-        // PONG), so it only fires for a selective FakeLag, never a genuine HOL-frozen lagger or recovery flush.
+        // Only a reply to a transaction sent after gap detection can establish ongoing traffic.
         if (inGap
                 && player.lastTransactionReceived.get() > transSentAtGapStart
-                && System.currentTimeMillis() - lastFlyingPacketMs > gapThresholdMs) {
+                && clock.getAsLong() - lastFlyingPacketMs > gapThresholdMs) {
             sawInboundDuringGap = true;
         }
     }
 
     public synchronized void onAttackPacket() {
-        long now = System.currentTimeMillis();
+        if (isExempt()) {
+            reset();
+            return;
+        }
+        long now = clock.getAsLong();
         long gap = now - lastFlyingPacketMs;
-        if (!inGap && gap > gapThresholdMs && !isExempt()) {
+        if (!inGap && gap > gapThresholdMs) {
             inGap = true;
             gapStartMs = lastFlyingPacketMs;
             onGapEntered();
@@ -98,8 +111,6 @@ public class FreezeDetector {
         if (inGap) attackPacketsDuringGap++;
     }
 
-    // Reset the S5 latch and snapshot the outbound transaction id at gap start, so onTransactionReceived can tell
-    // a fresh PING confirmed during the freeze from a stale in-flight PONG sent before it.
     private void onGapEntered() {
         sawInboundDuringGap = false;
         transSentAtGapStart = player.lastTransactionSent.get();
@@ -109,20 +120,18 @@ public class FreezeDetector {
         return getScore() >= scoreCancel;
     }
 
-    public boolean shouldFlag() {
-        // require S5 (proof of liveness during the freeze) so a real lagger's buffered-attack +2 can't escalate to
-        // a flag/setback on its own - only a socket-alive-while-movement-frozen FakeLag clears this gate
-        return getScore() >= scoreFlag && sawInboundDuringGap;
+    public synchronized boolean shouldFlag() {
+        // Liveness proof counts only while movement is still withheld.
+        return getScore() >= scoreFlag && sawInboundDuringGap
+                && clock.getAsLong() - lastFlyingPacketMs > gapThresholdMs;
     }
 
     public synchronized int getScore() {
         if (isExempt()) return 0;
 
         int score = 0;
-        long now = System.currentTimeMillis();
+        long now = clock.getAsLong();
         long currentGap = inGap ? now - gapStartMs : Math.max(0, now - lastFlyingPacketMs);
-
-        if (currentGap > 5000) return 0;
 
         if (currentGap > gapStrongThresholdMs) score += 2;
         else if (currentGap > gapThresholdMs) score += 1;
@@ -139,11 +148,11 @@ public class FreezeDetector {
     }
 
     public boolean recentlyUnfroze(int ms) {
-        return lastUnfreezeMs > 0 && System.currentTimeMillis() - lastUnfreezeMs < ms;
+        return lastUnfreezeMs > 0 && clock.getAsLong() - lastUnfreezeMs < ms;
     }
 
     public long getCurrentGapMs() {
-        long now = System.currentTimeMillis();
+        long now = clock.getAsLong();
         return inGap ? now - gapStartMs : Math.max(0, now - lastFlyingPacketMs);
     }
 
@@ -158,7 +167,7 @@ public class FreezeDetector {
         recoveryFlyingsInGap = 0;
         consecutiveNormalFlyings = 0;
         sawInboundDuringGap = false;
-        lastFlyingPacketMs = System.currentTimeMillis();
+        lastFlyingPacketMs = clock.getAsLong();
     }
 
     public long getLastFlyingMs() {
@@ -177,7 +186,7 @@ public class FreezeDetector {
 
     private boolean isExempt() {
         if (player.gamemode == GameMode.SPECTATOR) return true;
-        if (System.currentTimeMillis() - player.joinTime < JOIN_GRACE_MS) return true;
+        if (clock.getAsLong() - player.joinTime < JOIN_GRACE_MS) return true;
         if (player.packetStateData.lastPacketWasTeleport) return true;
         if (player.disableGrim) return true;
         if (player.inVehicle()) return true;

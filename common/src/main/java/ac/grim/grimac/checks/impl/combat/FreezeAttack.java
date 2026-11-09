@@ -48,7 +48,7 @@ public class FreezeAttack extends Check implements PacketReceiveListener {
         int score = player.freezeDetector.getScore();
         if (score < player.freezeDetector.scoreCancel) return;
 
-        if (cancelHits) {
+        if (cancelHits && shouldModifyPackets()) {
             // deny the withheld hit but stay off the shared spam-kick counter (GrimPlayer.onPacketCancel) -
             // a buffered-attack flush from a real lagger would otherwise cross spamThreshold and disconnect them
             event.setCancelled(true);
