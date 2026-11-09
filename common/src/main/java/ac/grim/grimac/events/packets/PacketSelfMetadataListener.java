@@ -187,10 +187,14 @@ public class PacketSelfMetadataListener extends PacketListenerAbstract {
                 // This was added for stuff like shields, but IMO it really should be all client sided
                 boolean isActive = (data & 0x1) != 0;
                 boolean isOffhand = (data & 0x2) != 0;
+                InteractionHand hand = isOffhand ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
 
-                // Player might have gotten this packet
-                player.latencyUtils.addRealTimeTask(player.lastTransactionSent.get(),
-                        () -> player.packetStateData.setSlowedByUsingItem(false));
+                player.latencyUtils.addRealTimeTask(player.lastTransactionSent.get(), () -> {
+                    // A delayed post-transaction must not disable NoSlow.
+                    if (!isActive || player.packetStateData.itemInUseHand != hand) {
+                        player.packetStateData.setSlowedByUsingItem(false);
+                    }
+                });
 
                 int markedTransaction = player.lastTransactionSent.get();
 
@@ -203,7 +207,7 @@ public class PacketSelfMetadataListener extends PacketListenerAbstract {
                         player.packetStateData.setSlowedByUsingItem(isActive);
 
                         if (isActive) {
-                            player.packetStateData.itemInUseHand = isOffhand ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
+                            player.packetStateData.itemInUseHand = hand;
                         }
                     }
                 });
