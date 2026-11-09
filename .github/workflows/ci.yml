@@ -9,6 +9,9 @@ on:
             - '2.0'
         paths:
             - '.github/**'
+            - 'gradle/wrapper/**'
+            - 'gradlew'
+            - 'gradlew.bat'
     pull_request:
         branches:
             - '2.0'
