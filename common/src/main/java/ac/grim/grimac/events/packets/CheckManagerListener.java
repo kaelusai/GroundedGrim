@@ -920,7 +920,8 @@ public class CheckManagerListener extends PacketListenerAbstract {
 
         player.queuedBreaks.add(blockBreak);
 
-        if (action == DiggingAction.FINISHED_DIGGING && isBreakable(blockBreak.block.getType())) {
+        if (action == DiggingAction.FINISHED_DIGGING && isBreakable(blockBreak.block.getType())
+                && player.compensatedWorld.canPredictBlockBreak(blockBreak.position)) {
             player.compensatedWorld.startPredicting();
             player.compensatedWorld.updateBlock(blockBreak.position, 0);
             player.compensatedWorld.stopPredicting(packet);
@@ -950,6 +951,9 @@ public class CheckManagerListener extends PacketListenerAbstract {
                     player.compensatedWorld.updateBlock(blockBreak.position, 0);
                 }
                 player.compensatedWorld.stopPredicting(packet);
+            } else {
+                // An instant break does not replace vanilla's resumable mining target.
+                player.compensatedWorld.recordBlockBreakStart(blockBreak.position);
             }
         }
 

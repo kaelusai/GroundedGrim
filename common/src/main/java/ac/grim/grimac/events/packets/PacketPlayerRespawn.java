@@ -149,6 +149,7 @@ public class PacketPlayerRespawn extends PacketListenerAbstract {
             // Also invalidate previous positions
             player.getSetbackTeleportUtil().hasAcceptedSpawnTeleport = false;
             player.getSetbackTeleportUtil().lastKnownGoodPosition = null;
+            player.compensatedWorld.clearBlockBreakTarget();
 
             // clear server entity positions when the world changes
             if (isWorldChange(player, respawn)) {

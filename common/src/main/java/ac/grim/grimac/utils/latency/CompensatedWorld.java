@@ -93,6 +93,7 @@ public class CompensatedWorld implements PacketWorld {
     private final Int2ObjectMap<List<Vector3i>> serverIsCurrentlyProcessingThesePredictions = new Int2ObjectOpenHashMap<>();
     private final Object2ObjectLinkedOpenHashMap<Pair<Vector3i, DiggingAction>, Vector3d> unackedActions = new Object2ObjectLinkedOpenHashMap<>();
     private boolean isCurrentlyPredicting = false;
+    private Vector3i blockBreakTarget;
     public boolean isRaining = false;
 
     private final boolean noNegativeBlocks;
@@ -101,6 +102,19 @@ public class CompensatedWorld implements PacketWorld {
         this.player = player;
         this.chunks = new Long2ObjectOpenHashMap<>(81, 0.5f);
         this.noNegativeBlocks = player.getClientVersion().isOlderThanOrEquals(ClientVersion.V_1_16_4);
+    }
+
+    public void recordBlockBreakStart(Vector3i position) {
+        blockBreakTarget = position;
+    }
+
+    public boolean canPredictBlockBreak(Vector3i position) {
+        // Modern clients can resume the last started block after CANCEL without another START.
+        return position.equals(blockBreakTarget);
+    }
+
+    public void clearBlockBreakTarget() {
+        blockBreakTarget = null;
     }
 
     public void startPredicting() {
@@ -249,6 +263,7 @@ public class CompensatedWorld implements PacketWorld {
     }
 
     public void clearPredictions() {
+        clearBlockBreakTarget();
         originalServerBlocks.clear();
         currentlyChangedBlocks = new LinkedList<>();
         serverIsCurrentlyProcessingThesePredictions.clear();
