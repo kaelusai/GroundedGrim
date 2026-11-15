@@ -13,6 +13,8 @@ import ac.grim.grimac.utils.data.BlockHitData;
 import ac.grim.grimac.utils.data.EntityHitData;
 import ac.grim.grimac.utils.data.HitData;
 import ac.grim.grimac.utils.data.PacketStateData;
+import ac.grim.grimac.utils.data.TrackerData;
+import ac.grim.grimac.utils.data.TrackedPosition;
 import ac.grim.grimac.utils.data.packetentity.PacketEntity;
 import ac.grim.grimac.utils.data.packetentity.PacketEntitySelf;
 import ac.grim.grimac.utils.enums.Pose;
@@ -352,6 +354,111 @@ class WorldRayTraceTest {
         PacketReceiveEvent attack = rangeAttack(3, 5, 0, 0, .3, 0, 3.2);
         verify(attack).setCancelled(true);
         assertEquals("WALL_HIT", queuedReachResult());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "2000, 4.3, 3, 3, 0, 1000, true",
+            "200, 4.3, 3, 3, 0, 1000, false",
+            "2000, 2.8, 3, 3, 0, 1000, false",
+            "2000, 4.3, 5, 5, 0, 1000, false",
+            "2000, 4.3, 3, 5, 2, 1000, false",
+            "2000, 4.3, 3, 3, 0, -1, false",
+            "2000, 4.3, 3, 3, 0, 5000, false"
+    })
+    void boundsHistoricalReachWithoutFlaggingLatency(long ageMs, double serverX, float startRange,
+                                                     float currentRange, double motionX, long budgetMs,
+                                                     boolean cancelled) throws ReflectiveOperationException {
+        var position = new TrackedPosition();
+        position.setPos(new Vector3d(1.3, 0, .5));
+        setField(target, "trackedServerPosition", position);
+        target.currentPose = Pose.STANDING;
+        when(target.getAttributeValue(Attributes.SCALE)).thenReturn(1.0);
+        var tracker = new TrackerData(serverX, 0, .5, 0, 0, EntityTypes.PLAYER, 0);
+        tracker.recordPositionUpdate(1, 0, System.nanoTime() - java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(ageMs));
+        when(player.compensatedEntities.getTrackedEntity(1)).thenReturn(tracker);
+        setField(reach, "maxLagCompensationNanos", java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(budgetMs));
+        PacketReceiveEvent event = rangeAttack(startRange, currentRange, 0, 0, motionX, 0, 1);
+        if (cancelled) {
+            verify(event).setCancelled(true);
+            Field queue = findField(Reach.class, "playerAttackQueue");
+            queue.setAccessible(true);
+            assertTrue(((Map<?, ?>) queue.get(reach)).isEmpty());
+        } else {
+            verify(event, never()).setCancelled(true);
+            assertEquals("NONE", queuedReachResult());
+        }
+        assertEquals(0, reach.violations);
+        verify(player, never()).onPacketCancel();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ClientVersion.class, names = {"V_1_8", "V_1_17", "V_1_21_4", "V_1_21_11", "V_26_2"})
+    void staleReachGuardUsesTheSamePolicyAcrossClientVersions(ClientVersion version) throws ReflectiveOperationException {
+        installStaleTarget();
+        rangeAttack(3, 3, 0, 0, 0, 0, 1);
+        when(player.getClientVersion()).thenReturn(version);
+        when(player.getMovementThreshold()).thenReturn(version.isOlderThan(ClientVersion.V_1_18_2) ? .03 : .0002);
+        when(player.canSkipTicks()).thenReturn(version.isNewerThanOrEquals(ClientVersion.V_1_9)
+                && version.isOlderThan(ClientVersion.V_1_21_2));
+        verify(interactAgain()).setCancelled(true);
+        assertEquals(0, reach.violations);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"creative", "spectator", "vehicle", "target-vehicle", "packet-permission", "cancellation-disabled"})
+    void staleReachGuardPreservesExemptions(String exemption) throws ReflectiveOperationException {
+        installStaleTarget();
+        rangeAttack(3, 3, 0, 0, 0, 0, 1);
+        switch (exemption) {
+            case "creative" -> player.gamemode = com.github.retrooper.packetevents.protocol.player.GameMode.CREATIVE;
+            case "spectator" -> player.gamemode = com.github.retrooper.packetevents.protocol.player.GameMode.SPECTATOR;
+            case "vehicle" -> when(player.inVehicle()).thenReturn(true);
+            case "target-vehicle" -> target.riding = mock(PacketEntity.class);
+            case "packet-permission" -> doReturn(false).when(reach).shouldModifyPackets();
+            case "cancellation-disabled" -> setField(reach, "cancelImpossibleHits", false);
+        }
+        verify(interactAgain(), never()).setCancelled(true);
+        assertEquals(0, reach.violations);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "STANDING, 2, 3.5, false",
+            "CROUCHING, 1, 3.2, false",
+            "SWIMMING, 1, 3.1, false",
+            "FALL_FLYING, 1, 3.1, false",
+            "STANDING, 0.5, 2.9, false",
+            "STANDING, 2, 4, true"
+    })
+    void staleReachGuardRespectsTargetPoseAndScale(Pose pose, double scale, double serverX,
+                                                  boolean cancelled) throws ReflectiveOperationException {
+        installStaleTarget();
+        rangeAttack(3, 3, 0, 0, 0, 0, 1);
+        target.currentPose = pose;
+        when(target.getAttributeValue(Attributes.SCALE)).thenReturn(scale);
+        player.compensatedEntities.getTrackedEntity(1).setX(serverX);
+        PacketReceiveEvent event = interactAgain();
+        if (cancelled) verify(event).setCancelled(true);
+        else verify(event, never()).setCancelled(true);
+        assertEquals(0, reach.violations);
+    }
+
+    private void installStaleTarget() throws ReflectiveOperationException {
+        target.currentPose = Pose.STANDING;
+        when(target.getAttributeValue(Attributes.SCALE)).thenReturn(1.0);
+        var tracker = new TrackerData(4.3, 0, .5, 0, 0, EntityTypes.PLAYER, 0);
+        tracker.recordPositionUpdate(1, 0, System.nanoTime() - java.util.concurrent.TimeUnit.SECONDS.toNanos(2));
+        when(player.compensatedEntities.getTrackedEntity(1)).thenReturn(tracker);
+        setField(reach, "maxLagCompensationNanos", java.util.concurrent.TimeUnit.SECONDS.toNanos(1));
+    }
+
+    private PacketReceiveEvent interactAgain() throws ReflectiveOperationException {
+        Method interact = Reach.class.getDeclaredMethod("onInteract", PacketReceiveEvent.class, int.class, InteractionHand.class);
+        interact.setAccessible(true);
+        PacketReceiveEvent event = mock(PacketReceiveEvent.class);
+        interact.invoke(reach, event, 1, InteractionHand.MAIN_HAND);
+        return event;
     }
 
     @Test

@@ -60,6 +60,7 @@ import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 // You may not copy the check unless you are licensed under GPL
 @CheckData(name = "Reach", stableKey = "grim.combat.reach", description = "Attacked an entity from too far away")
@@ -86,6 +87,7 @@ public class Reach extends Check implements PacketReceiveListener {
     private boolean entityPierceOnlyPlayers;
     public double threshold;
     private double hitboxExtraExpansion;
+    private long maxLagCompensationNanos;
     private double reachExtraExpansion;
     private Set<String> wallHitIgnoredBlocks = new HashSet<>();
     private final java.util.HashMap<Integer, Double> cancelBuffers = new java.util.HashMap<>();
@@ -197,6 +199,15 @@ public class Reach extends Check implements PacketReceiveListener {
             }
         }
 
+        boolean canCancel = shouldModifyPackets() && cancelImpossibleHits;
+        // The next look packet determines the projection, so use its upper bound for early cancellation.
+        double earlyMaxReach = Math.min(maxReach + (attackRangeMovement == null ? 0 : attackRangeMovement.length()), currentMaxReach);
+        if (canCancel && isStaleTargetOutOfReach(entityId, entity, hasRange, earlyMaxReach, hitboxMargin)) {
+            event.setCancelled(true);
+            // A latency-only denial must not contribute to invalid-packet spam kicks.
+            return;
+        }
+
         boolean tooManyAttacks = playerAttackQueue.size() > 10;
         if (!tooManyAttacks) {
             playerAttackQueue.put(entityId, new InteractionData(
@@ -205,9 +216,6 @@ public class Reach extends Check implements PacketReceiveListener {
             )); // Queue for next tick for very precise check
         }
 
-        boolean canCancel = shouldModifyPackets() && cancelImpossibleHits;
-        // The next look packet determines the projection, so use its upper bound for early cancellation.
-        double earlyMaxReach = Math.min(maxReach + (attackRangeMovement == null ? 0 : attackRangeMovement.length()), currentMaxReach);
         boolean knownInvalid = (attackRangeMovement == null || Double.isFinite(currentMaxReach))
                 && isKnownInvalid(entityId, entity, hasRange, earlyMaxReach, hitboxMargin, canCancel);
 
@@ -215,6 +223,25 @@ public class Reach extends Check implements PacketReceiveListener {
             event.setCancelled(true);
             player.onPacketCancel();
         }
+    }
+
+    private boolean isStaleTargetOutOfReach(int entityId, PacketEntity entity, boolean hasRange, double itemMaxReach, float itemHitboxMargin) {
+        if (maxLagCompensationNanos <= 0) return false;
+        if ((blacklisted.contains(entity.getType()) || !entity.isLivingEntity) && entity.getType() != EntityTypes.END_CRYSTAL) {
+            return false;
+        }
+        var tracker = player.compensatedEntities.getTrackedEntity(entityId);
+        if (tracker == null || !tracker.isPositionUpdateStale(player.getLastTransactionReceived(), System.nanoTime(), maxLagCompensationNanos)) {
+            return false;
+        }
+
+        SimpleCollisionBox targetBox = GetBoundingBox.getPacketEntityBoundingBox(
+                player, tracker.getX(), tracker.getY(), tracker.getZ(), entity);
+        double maxReach = applyReachModifiers(targetBox, hasRange, itemMaxReach, itemHitboxMargin,
+                !player.packetStateData.didLastMovementIncludePosition);
+        if (hitboxExtraExpansion > 0) targetBox.expand(hitboxExtraExpansion);
+        // A long delay limits historical reach; it is not evidence of cheating by itself.
+        return ReachUtils.getMinReachToBox(player, targetBox) > maxReach;
     }
 
     // This method finds the most optimal point at which the user should be aiming at
@@ -487,6 +514,8 @@ public class Reach extends Check implements PacketReceiveListener {
         this.threshold = config.getDoubleElse("Reach.threshold", 0.0005);
         this.reachExtraExpansion = config.getDoubleElse("Reach.extra-expansion", 0.0);
         this.hitboxExtraExpansion = config.getDoubleElse("Hitboxes.extra-expansion", 0.0);
+        this.maxLagCompensationNanos = TimeUnit.MILLISECONDS.toNanos(
+                config.getLongElse("Reach.max-lag-compensation-ms", 1000));
     }
 
     // Track block changes to prevent WallHit false positives from dynamic blocks (doors, pistons etc.)

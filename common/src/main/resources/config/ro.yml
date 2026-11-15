@@ -229,6 +229,8 @@ Hitboxes:
     extra-expansion: 0.01
 
 Reach:
+    # Limit historical reach against out-of-range targets (milliseconds); -1 disables.
+    max-lag-compensation-ms: 1000
     # Cu cât să mărim hitboxurile? 0.0005 ar trebui să detecteze reach 3.0005+
     #
     # Există o extindere forțată de 0.03 cu clienți 1.9-1.18.1 (nu 1.18.2), sau unele combinații client/server datorită

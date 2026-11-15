@@ -570,9 +570,11 @@ public class PacketEntityReplication extends GrimProcessor implements PacketRece
         data.setLastTransactionHung(player.lastTransactionSent.get());
 
         int lastTrans = player.lastTransactionSent.get();
+        long sentAtNanos = hasPos ? System.nanoTime() : 0;
+        if (hasPos) data.recordPositionUpdate(lastTrans + 1, player.lastTransactionReceived.get(), sentAtNanos);
 
         boolean positionSync = event.getPacketType() == PacketType.Play.Server.ENTITY_POSITION_SYNC;
-        EntityMovementTransaction task = new EntityMovementTransaction(player, entityId, path, yaw, pitch, isRelative, hasPos, deltaX, deltaY, deltaZ, positionSync, lastTrans);
+        EntityMovementTransaction task = new EntityMovementTransaction(player, entityId, path, yaw, pitch, isRelative, hasPos, deltaX, deltaY, deltaZ, positionSync, lastTrans, data);
         player.latencyUtils.addRealTimeTask(lastTrans, task);
         player.latencyUtils.addRealTimeTask(lastTrans + 1, task);
     }

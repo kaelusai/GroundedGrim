@@ -3,6 +3,7 @@ package ac.grim.grimac.utils.data.interpolation;
 import ac.grim.grimac.player.GrimPlayer;
 import ac.grim.grimac.utils.data.packetentity.PacketEntity;
 import ac.grim.grimac.utils.data.packetentity.PacketEntityTrackXRot;
+import ac.grim.grimac.utils.data.TrackerData;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.vector.positionpath.PositionPath;
 import lombok.RequiredArgsConstructor;
@@ -20,12 +21,16 @@ public final class EntityMovementTransaction implements Runnable {
     private final double x, y, z;
     private final boolean positionSync;
     private final int transaction;
+    private final TrackerData tracker;
     private boolean started;
 
     @Override
     public void run() {
         PacketEntity receiver = player.compensatedEntities.getEntity(entityId);
         if (started) {
+            if (hasPos && player.compensatedEntities.getTrackedEntity(entityId) == tracker) {
+                tracker.acknowledgePositionUpdate(transaction + 1);
+            }
             if (receiver != null) receiver.onSecondTransaction(transaction);
             return;
         }
