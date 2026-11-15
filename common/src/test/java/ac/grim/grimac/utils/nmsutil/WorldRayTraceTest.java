@@ -6,6 +6,7 @@ import ac.grim.grimac.manager.CheckManager;
 import ac.grim.grimac.manager.SetbackTeleportUtil;
 import ac.grim.grimac.predictionengine.PointThreeEstimator;
 import ac.grim.grimac.predictionengine.blockeffects.CompensatedGeysers;
+import ac.grim.grimac.testutil.GrimPlayerFixture;
 import ac.grim.grimac.utils.chunks.Column;
 import ac.grim.grimac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.grim.grimac.utils.data.BlockHitData;
@@ -20,10 +21,6 @@ import ac.grim.grimac.utils.math.Vector3dm;
 import ac.grim.grimac.utils.latency.CompensatedEntities;
 import ac.grim.grimac.utils.latency.CompensatedInventory;
 import ac.grim.grimac.utils.latency.CompensatedWorld;
-import com.github.retrooper.packetevents.PacketEvents;
-import com.github.retrooper.packetevents.PacketEventsAPI;
-import com.github.retrooper.packetevents.settings.PacketEventsSettings;
-import com.github.retrooper.packetevents.manager.server.ServerVersion;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.component.ComponentTypes;
 import com.github.retrooper.packetevents.protocol.component.builtin.item.ItemAttackRange;
@@ -39,7 +36,6 @@ import com.github.retrooper.packetevents.protocol.world.chunk.BaseChunk;
 import com.github.retrooper.packetevents.protocol.world.states.type.StateTypes;
 import com.github.retrooper.packetevents.util.Vector3d;
 import com.github.retrooper.packetevents.util.Vector3i;
-import io.github.retrooper.packetevents.impl.netty.NettyManagerImpl;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import org.junit.jupiter.api.BeforeAll;
@@ -71,15 +67,8 @@ class WorldRayTraceTest {
     private final Map<Vector3i, WrappedBlockState> blocks = new HashMap<>();
 
     @BeforeAll
-    static void packetEvents() throws ClassNotFoundException {
-        PacketEventsAPI<?> api = mock(PacketEventsAPI.class, RETURNS_DEEP_STUBS);
-        when(api.getServerManager().getVersion()).thenReturn(ServerVersion.V_1_21_11);
-        when(api.getSettings()).thenReturn(new PacketEventsSettings());
-        when(api.getNettyManager()).thenReturn(new NettyManagerImpl());
-        PacketEvents.setAPI(api);
-        // Reach's feature gates are fixed at startup; block fixtures use the 1.21.4 palette.
-        Class.forName(Reach.class.getName());
-        when(api.getServerManager().getVersion()).thenReturn(ServerVersion.V_1_21_4);
+    static void packetEvents() {
+        GrimPlayerFixture.initializePacketEvents();
         EntityTypes.PLAYER.getName();
         Attributes.ENTITY_INTERACTION_RANGE.getName();
     }

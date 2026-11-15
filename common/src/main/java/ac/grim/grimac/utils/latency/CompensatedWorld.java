@@ -382,6 +382,8 @@ public class CompensatedWorld implements PacketWorld {
                 }
                 // Copy-on-write: never mutate a shared section in place
                 chunk = ChunkSectionCache.detachSectionForWrite(column, sectionIndex, chunk);
+                chunk = ChunkSectionCache.ensureStorageCapacity(chunk);
+                column.chunks()[sectionIndex] = chunk;
                 chunk.set(x & 0xF, offsetY & 0xF, z & 0xF, combinedID);
                 player.compensatedGeysers.updateBlock(x, y, z, previousState, newState, minHeight);
 

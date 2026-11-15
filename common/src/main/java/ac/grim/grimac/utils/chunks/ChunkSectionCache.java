@@ -410,6 +410,17 @@ public final class ChunkSectionCache {
         return copy;
     }
 
+    public static BaseChunk ensureStorageCapacity(BaseChunk section) {
+        if (section instanceof Chunk_v1_18 chunk) {
+            PaletteStorage.ensureCapacity(chunk.getChunkData());
+        } else if (section instanceof Chunk_v1_9 chunk) {
+            DataPalette data = v19Data(chunk);
+            if (data == null) return copySection(section);
+            PaletteStorage.ensureCapacity(data);
+        }
+        return section;
+    }
+
     public static SharedRef internRef(BaseChunk fresh) {
         if (fresh.isEmpty()) {
             // Fast-path for all-air chunks
