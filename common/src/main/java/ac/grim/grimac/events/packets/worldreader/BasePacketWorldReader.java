@@ -166,9 +166,8 @@ public class BasePacketWorldReader extends PacketListenerAbstract {
                 player.lastTransSent + 2 < System.currentTimeMillis())
             player.sendTransaction();
 
-        int bx = blockPosition.getX(), by = blockPosition.getY(), bz = blockPosition.getZ();
         int bid = blockChange.getBlockId();
-        player.latencyUtils.addRealTimeTask(player.lastTransactionSent.get(), () -> player.compensatedWorld.updateBlock(bx, by, bz, bid));
+        player.latencyUtils.addRealTimeTask(player.lastTransactionSent.get(), () -> player.compensatedWorld.updateBlock(blockPosition, bid));
     }
 
     public void handleMultiBlockChange(GrimPlayer player, PacketSendEvent event) {

@@ -100,11 +100,12 @@ public class PredictionEngine {
 
         player.skippedTickInActualMovement = false;
 
+        float stepUpHeight = player.getMaxUpStep();
         for (VectorData clientVelAfterInput : possibleVelocities) {
             Vector3dm primaryPushMovement = handleStartingVelocityUncertainty(player, clientVelAfterInput, player.actualMovement);
             player.uncertaintyHandler.stashBoxTerms(clientVelAfterInput.vector, primaryPushMovement);
 
-            Vector3dm bestTheoreticalCollisionResult = VectorUtils.cutBoxToVector(player.actualMovement, new SimpleCollisionBox(0, Math.min(0, primaryPushMovement.getY()), 0, primaryPushMovement.getX(), Math.max(0.6, primaryPushMovement.getY()), primaryPushMovement.getZ()).sort());
+            Vector3dm bestTheoreticalCollisionResult = VectorUtils.cutBoxToVector(player.actualMovement, new SimpleCollisionBox(0, Math.min(0, primaryPushMovement.getY()), 0, primaryPushMovement.getX(), Math.max(stepUpHeight, primaryPushMovement.getY()), primaryPushMovement.getZ()).sort());
             // Check if this vector could ever possible beat the last vector in terms of accuracy
             // This is quite a good optimization :)
             if (bestTheoreticalCollisionResult.distanceSquared(player.actualMovement) > bestInput && !clientVelAfterInput.isKnockback() && !clientVelAfterInput.isExplosion()) {
@@ -842,7 +843,7 @@ public class PredictionEngine {
         if (player.uncertaintyHandler.lastVehicleSwitch.hasOccurredSince(1)) {
             player.uncertaintyHandler.boxMutatorScratch |= UncertaintyHandler.BOX_VEHICLE_FRICTION;
             float airDrag = BlockProperties.getModifiedAirDrag(0.91F, player);
-            double trueFriction = player.lastOnGround ? player.friction * airDrag : airDrag;
+            double trueFriction = player.lastOnGround ? player.friction : airDrag;
             if (player.wasTouchingLava) trueFriction = 0.5;
             if (player.wasTouchingWater) trueFriction = 0.96;
 

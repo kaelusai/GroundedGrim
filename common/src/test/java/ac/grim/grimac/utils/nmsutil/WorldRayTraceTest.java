@@ -303,6 +303,7 @@ class WorldRayTraceTest {
         setField(player, "pointThreeEstimator", mock(PointThreeEstimator.class));
         setField(player, "compensatedGeysers", mock(CompensatedGeysers.class));
         doCallRealMethod().when(world).updateBlock(anyInt(), anyInt(), anyInt(), anyInt());
+        doCallRealMethod().when(world).updateBlock(any(Vector3i.class), anyInt());
         world.updateBlock(0, 0, 0, opened.getGlobalId());
         Field field = findField(Reach.class, "blocksChangedThisTick");
         field.setAccessible(true);
