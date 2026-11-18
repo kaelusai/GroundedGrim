@@ -11,15 +11,19 @@ import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.event.UserDisconnectEvent;
+import com.github.retrooper.packetevents.manager.server.ServerVersion;
 import com.github.retrooper.packetevents.protocol.ConnectionState;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.player.GameMode;
 import com.github.retrooper.packetevents.protocol.player.User;
 import com.github.retrooper.packetevents.protocol.player.UserProfile;
+import com.github.retrooper.packetevents.wrapper.PacketWrapper;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfo;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoRemove;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoUpdate;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoUpdate.Action;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoUpdate.PlayerInfo;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -30,6 +34,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -335,7 +340,7 @@ public class PacketStaffListSpoof extends PacketListenerAbstract {
     @Override
     public void onPacketSend(PacketSendEvent event) {
         if (!spoofSpectators && !spoofGameMode && !hideVanishedTeams && !fakeStaff && !pingSpoofingOn()) return;
-        if (PacketInfoSpoof.spoofExempt(event.getUser())) return;
+        if (event.isCancelled() || PacketInfoSpoof.spoofExempt(event.getUser())) return;
 
         User user = event.getUser();
         UUID self = user.getUUID();
@@ -344,12 +349,13 @@ public class PacketStaffListSpoof extends PacketListenerAbstract {
         if (event.getPacketType() == PacketType.Play.Server.TEAMS) {
             if (hideVanishedTeams) handleTeams(event, self);
         } else if (event.getPacketType() == PacketType.Play.Server.PLAYER_INFO_UPDATE) {
-            handleInfoUpdate(event, user, self);
+            handleInfoUpdate(event, self);
         } else if (event.getPacketType() == PacketType.Play.Server.PLAYER_INFO_REMOVE) {
-            if (hideVanishedTeams) handleInfoRemove(event, user, self);
+            if (hideVanishedTeams) handleInfoRemove(event, self);
         } else if (event.getPacketType() == PacketType.Play.Server.PLAYER_INFO) {
-            handleLegacyInfo(event, user, self);
+            handleLegacyInfo(event, self);
         } else if (event.getPacketType() == PacketType.Play.Server.JOIN_GAME) {
+            STATES.remove(self);
             // The client builds a fresh scoreboard per connection, so every login needs the set again.
             List<Fake> current = fakes;
             if (!current.isEmpty()) {
@@ -370,11 +376,16 @@ public class PacketStaffListSpoof extends PacketListenerAbstract {
                 Collection<String> members = wrapper.getPlayers();
                 List<String> keep = null;
                 for (String member : members) {
+                    boolean hidden = isHidden(self, member);
+                    if (hidden) hideMembership(state, event, member);
                     state.memberTeam.put(member, team);
-                    if (!isHidden(self, member)) continue;
+                    if (!hidden) {
+                        state.hiddenTeams.remove(member);
+                        continue;
+                    }
                     if (keep == null) keep = new ArrayList<>(members);
                     keep.remove(member);
-                    state.hidden.computeIfAbsent(team, k -> ConcurrentHashMap.newKeySet()).add(member);
+                    state.hiddenTeams.put(member, team);
                 }
                 if (keep == null) return;
                 // An empty CREATE still has to reach the client, or later members have nothing to join.
@@ -386,16 +397,24 @@ public class PacketStaffListSpoof extends PacketListenerAbstract {
                 }
             }
             case REMOVE_ENTITIES -> {
-                Set<String> hidden = state.hidden.get(team);
-                for (String member : wrapper.getPlayers()) {
-                    // Our own suppression packet returns through here; forget it and there is nothing
-                    // left to restore once the player is visible again.
-                    if (hidden != null && hidden.contains(member)) continue;
-                    state.memberTeam.remove(member);
+                Collection<String> members = wrapper.getPlayers();
+                List<String> keep = null;
+                for (String member : members) {
+                    state.memberTeam.remove(member, team);
+                    if (!state.hiddenTeams.remove(member, team)) continue;
+                    if (keep == null) keep = new ArrayList<>(members);
+                    keep.remove(member);
+                }
+                if (keep != null) {
+                    if (keep.isEmpty()) event.setCancelled(true);
+                    else {
+                        wrapper.setPlayers(keep);
+                        event.markForReEncode(true);
+                    }
                 }
             }
             case REMOVE -> {
-                state.hidden.remove(team);
+                state.hiddenTeams.values().removeIf(team::equals);
                 state.memberTeam.values().removeIf(team::equals);
             }
             default -> {
@@ -403,53 +422,104 @@ public class PacketStaffListSpoof extends PacketListenerAbstract {
         }
     }
 
-    private void handleInfoUpdate(PacketSendEvent event, User user, UUID self) {
+    private void handleInfoUpdate(PacketSendEvent event, UUID self) {
         WrapperPlayServerPlayerInfoUpdate wrapper = new WrapperPlayServerPlayerInfoUpdate(event);
-        EnumSet<WrapperPlayServerPlayerInfoUpdate.Action> actions = wrapper.getActions();
-        boolean added = actions.contains(WrapperPlayServerPlayerInfoUpdate.Action.ADD_PLAYER);
+        EnumSet<Action> actions = wrapper.getActions();
         boolean gameMode = (spoofSpectators || spoofGameMode)
-                && (added || actions.contains(WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_GAME_MODE));
+                && actions.contains(Action.UPDATE_GAME_MODE);
         boolean ping = pingSpoofingOn()
-                && (added || actions.contains(WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_LATENCY));
-        if (!added && !gameMode && !ping) return;
+                && actions.contains(Action.UPDATE_LATENCY);
+        if (!hideVanishedTeams && !gameMode && !ping) return;
 
-        State state = hideVanishedTeams && added ? STATES.get(self) : null;
-        List<WrapperPlayServerPlayerInfoUpdate.PlayerInfo> entries = wrapper.getEntries();
-        List<WrapperPlayServerPlayerInfoUpdate.PlayerInfo> rewritten = null;
+        State state = hideVanishedTeams ? STATES.computeIfAbsent(self, k -> new State()) : null;
+        PlatformPlayerFactory factory = state == null ? null : GrimAPI.INSTANCE.getPlatformPlayerFactory();
+        PlatformPlayer receiver = factory == null ? null : factory.getFromUUID(self);
+        List<PlayerInfo> entries = wrapper.getEntries();
+        List<PlayerInfo> rewritten = null;
 
         for (int i = 0; i < entries.size(); i++) {
-            WrapperPlayServerPlayerInfoUpdate.PlayerInfo entry = entries.get(i);
+            PlayerInfo entry = entries.get(i);
             UUID uuid = entry.getProfileId();
-            if (state != null) becameVisible(state, event, user, self, entry.getGameProfile());
-            if (self.equals(uuid)) continue;
-
-            GameMode mode = gameMode ? reportedMode(entry.getGameMode()) : entry.getGameMode();
-            int latency = ping ? fakePing(uuid, entry.getLatency()) : entry.getLatency();
-            if (mode == entry.getGameMode() && latency == entry.getLatency()) continue;
-
-            if (rewritten == null) rewritten = new ArrayList<>(entries);
-            WrapperPlayServerPlayerInfoUpdate.PlayerInfo copy = new WrapperPlayServerPlayerInfoUpdate.PlayerInfo(entry);
-            copy.setGameMode(mode);
-            copy.setLatency(latency);
-            rewritten.set(i, copy);
+            PlayerInfo outgoing = entry;
+            boolean forward = true;
+            if (!self.equals(uuid)) {
+                GameMode mode = gameMode ? reportedMode(entry.getGameMode()) : entry.getGameMode();
+                int latency = ping ? fakePing(uuid, entry.getLatency()) : entry.getLatency();
+                if (mode != entry.getGameMode() || latency != entry.getLatency()) {
+                    outgoing = new PlayerInfo(entry);
+                    outgoing.setGameMode(mode);
+                    outgoing.setLatency(latency);
+                }
+                if (receiver != null) {
+                    forward = trackProfile(state, event, actions, outgoing, receiver, factory.getFromUUID(uuid));
+                }
+            }
+            if (rewritten == null && (!forward || outgoing != entry)) {
+                rewritten = new ArrayList<>(entries.subList(0, i));
+            }
+            if (rewritten != null && forward) rewritten.add(outgoing);
         }
 
         if (rewritten != null) {
-            wrapper.setEntries(rewritten);
-            event.markForReEncode(true);
+            if (rewritten.isEmpty()) event.setCancelled(true);
+            else {
+                wrapper.setEntries(rewritten);
+                event.markForReEncode(true);
+            }
         }
     }
 
-    private void handleInfoRemove(PacketSendEvent event, User user, UUID self) {
+    private static boolean trackProfile(State state, PacketSendEvent event, EnumSet<Action> actions, PlayerInfo entry,
+                                        PlatformPlayer receiver, @Nullable PlatformPlayer target) {
+        UUID uuid = entry.getProfileId();
+        TrackedProfile tracked = state.profiles.get(uuid);
+        if (target == null && tracked == null) return true;
+
+        boolean added = actions.contains(Action.ADD_PLAYER);
+        boolean hidden = target != null && !receiver.canSee(target);
+        if (hidden && (tracked == null ? !added : !tracked.hidden)) {
+            send(event, PacketType.Play.Server.PLAYER_INFO_REMOVE, new WrapperPlayServerPlayerInfoRemove(List.of(uuid)));
+        }
+        if (tracked == null) {
+            if (!added && !hidden) return true;
+            tracked = new TrackedProfile(uuid);
+            state.profiles.put(uuid, tracked);
+        }
+        tracked.merge(actions, entry);
+        String name = tracked.info.getGameProfile().getName();
+        if ((name == null || name.isEmpty()) && target != null) name = target.getName();
+
+        if (hidden) {
+            tracked.hidden = true;
+            hideMembership(state, event, name);
+            return false;
+        }
+
+        if (tracked.hidden) {
+            if (target == null || !tracked.actions.contains(Action.ADD_PLAYER)) return false;
+            // A listing update cannot bring back a removed profile on its own.
+            send(event, PacketType.Play.Server.PLAYER_INFO_UPDATE,
+                    new WrapperPlayServerPlayerInfoUpdate(tracked.actions.clone(), new PlayerInfo(tracked.info)));
+            tracked.hidden = false;
+            restoreMembership(state, event, name);
+            return false;
+        }
+
+        if (added) restoreMembership(state, event, name);
+        return true;
+    }
+
+    private void handleInfoRemove(PacketSendEvent event, UUID self) {
         State state = STATES.get(self);
         if (state == null) return;
 
         for (UUID uuid : new WrapperPlayServerPlayerInfoRemove(event).getProfileIds()) {
-            becameHidden(state, event, user, self, uuid);
+            state.profiles.remove(uuid);
+            becameHidden(state, event, self, uuid);
         }
     }
 
-    private void handleLegacyInfo(PacketSendEvent event, User user, UUID self) {
+    private void handleLegacyInfo(PacketSendEvent event, UUID self) {
         WrapperPlayServerPlayerInfo wrapper = new WrapperPlayServerPlayerInfo(event);
         WrapperPlayServerPlayerInfo.Action action = wrapper.getAction();
         boolean added = action == WrapperPlayServerPlayerInfo.Action.ADD_PLAYER;
@@ -458,69 +528,86 @@ public class PacketStaffListSpoof extends PacketListenerAbstract {
                 && (added || action == WrapperPlayServerPlayerInfo.Action.UPDATE_GAME_MODE);
         boolean ping = pingSpoofingOn()
                 && (added || action == WrapperPlayServerPlayerInfo.Action.UPDATE_LATENCY);
-        if (!added && !removed && !gameMode && !ping) return;
+        if (!hideVanishedTeams && !gameMode && !ping) return;
 
         State state = hideVanishedTeams ? STATES.get(self) : null;
+        PlatformPlayerFactory factory = hideVanishedTeams ? GrimAPI.INSTANCE.getPlatformPlayerFactory() : null;
+        PlatformPlayer receiver = factory == null ? null : factory.getFromUUID(self);
         List<WrapperPlayServerPlayerInfo.PlayerData> entries = wrapper.getPlayerDataList();
         List<WrapperPlayServerPlayerInfo.PlayerData> rewritten = null;
 
         for (int i = 0; i < entries.size(); i++) {
             WrapperPlayServerPlayerInfo.PlayerData entry = entries.get(i);
             UserProfile profile = entry.getUserProfile();
-            if (state != null) {
-                if (added) becameVisible(state, event, user, self, profile);
-                else if (removed && profile != null) becameHidden(state, event, user, self, profile.getUUID());
-            }
             UUID uuid = profile == null ? null : profile.getUUID();
-            if (uuid != null && self.equals(uuid)) continue;
-
-            GameMode mode = gameMode ? reportedMode(entry.getGameMode()) : entry.getGameMode();
-            int latency = ping ? fakePing(uuid, entry.getPing()) : entry.getPing();
-            if (mode == entry.getGameMode() && latency == entry.getPing()) continue;
-
-            if (rewritten == null) rewritten = new ArrayList<>(entries);
-            rewritten.set(i, new WrapperPlayServerPlayerInfo.PlayerData(
-                    entry.getDisplayName(), profile, mode, entry.getSignatureData(), latency));
+            WrapperPlayServerPlayerInfo.PlayerData outgoing = entry;
+            boolean forward = true;
+            if (uuid != null && !self.equals(uuid)) {
+                PlatformPlayer target = receiver == null ? null : factory.getFromUUID(uuid);
+                boolean hidden = target != null && !receiver.canSee(target);
+                forward = removed || !hidden;
+                if (state != null) {
+                    if (hidden) hideMembership(state, event, target.getName());
+                    else if (added) restoreMembership(state, event, profile.getName());
+                }
+                GameMode mode = gameMode ? reportedMode(entry.getGameMode()) : entry.getGameMode();
+                int latency = ping ? fakePing(uuid, entry.getPing()) : entry.getPing();
+                if (mode != entry.getGameMode() || latency != entry.getPing()) {
+                    outgoing = new WrapperPlayServerPlayerInfo.PlayerData(
+                            entry.getDisplayName(), profile, mode, entry.getSignatureData(), latency);
+                }
+            }
+            if (rewritten == null && (!forward || outgoing != entry)) {
+                rewritten = new ArrayList<>(entries.subList(0, i));
+            }
+            if (rewritten != null && forward) rewritten.add(outgoing);
         }
 
         if (rewritten != null) {
-            wrapper.setPlayerDataList(rewritten);
-            event.markForReEncode(true);
+            if (rewritten.isEmpty()) event.setCancelled(true);
+            else {
+                wrapper.setPlayerDataList(rewritten);
+                event.markForReEncode(true);
+            }
         }
     }
 
-    private void becameVisible(State state, PacketSendEvent event, User user, UUID self, @Nullable UserProfile profile) {
-        String name = profile == null ? null : profile.getName();
-        if (name == null || isHidden(self, name)) return;
-
-        String team = state.memberTeam.get(name);
-        if (team == null) return;
-        Set<String> hidden = state.hidden.get(team);
-        if (hidden == null || !hidden.remove(name)) return;
-
-        // Sent after the tab entry lands, or the client would still have nobody by that name to team up.
-        send(event, user, team, WrapperPlayServerTeams.TeamMode.ADD_ENTITIES, name);
+    private static void restoreMembership(State state, PacketSendEvent event, @Nullable String name) {
+        if (name == null) return;
+        String team = state.hiddenTeams.remove(name);
+        if (team != null) sendMembership(event, team, WrapperPlayServerTeams.TeamMode.ADD_ENTITIES, name);
     }
 
-    private void becameHidden(State state, PacketSendEvent event, User user, UUID self, @Nullable UUID uuid) {
+    private void becameHidden(State state, PacketSendEvent event, UUID self, @Nullable UUID uuid) {
         if (uuid == null) return;
         PlatformPlayer target = GrimAPI.INSTANCE.getPlatformPlayerFactory().getFromUUID(uuid);
         if (target == null) return;
 
         String name = target.getName();
-        if (name == null || !isHidden(self, name)) return;
-
-        String team = state.memberTeam.get(name);
-        if (team == null) return;
-        if (!state.hidden.computeIfAbsent(team, k -> ConcurrentHashMap.newKeySet()).add(name)) return;
-
-        send(event, user, team, WrapperPlayServerTeams.TeamMode.REMOVE_ENTITIES, name);
+        if (name != null && isHidden(self, name)) hideMembership(state, event, name);
     }
 
-    // Silent: this bypasses the non-preVia chain, so grim's own team tracking keeps the real membership.
-    private static void send(PacketSendEvent event, User user, String team, WrapperPlayServerTeams.TeamMode mode, String name) {
-        event.getPostTasks().add(() -> user.sendPacketSilently(
-                new WrapperPlayServerTeams(team, mode, Optional.empty(), List.of(name))));
+    private static void hideMembership(State state, PacketSendEvent event, @Nullable String name) {
+        if (name == null) return;
+        String team = state.memberTeam.get(name);
+        if (team != null && !team.equals(state.hiddenTeams.put(name, team))) {
+            sendMembership(event, team, WrapperPlayServerTeams.TeamMode.REMOVE_ENTITIES, name);
+        }
+    }
+
+    private static void sendMembership(PacketSendEvent event, String team, WrapperPlayServerTeams.TeamMode mode, String name) {
+        send(event, PacketType.Play.Server.TEAMS,
+                new WrapperPlayServerTeams(team, mode, Optional.empty(), List.of(name)));
+    }
+
+    private static void send(PacketSendEvent event, PacketType.Play.Server type, PacketWrapper<?> packet) {
+        // Silent sends use the same wire format as the packet that triggered them.
+        ServerVersion wireVersion = event.getServerVersion();
+        ClientVersion version = wireVersion.toClientVersion();
+        packet.setServerVersion(wireVersion);
+        packet.setClientVersion(version);
+        packet.setNativePacketId(type.getId(version));
+        event.getPostTasks().add(() -> event.getUser().sendPacketSilently(packet));
     }
 
     private static boolean isHidden(UUID self, String member) {
@@ -537,7 +624,35 @@ public class PacketStaffListSpoof extends PacketListenerAbstract {
     }
 
     private static final class State {
-        final Map<String, String> memberTeam = new ConcurrentHashMap<>();
-        final Map<String, Set<String>> hidden = new ConcurrentHashMap<>();
+        final Map<String, String> memberTeam = new HashMap<>();
+        final Map<String, String> hiddenTeams = new HashMap<>();
+        final Map<UUID, TrackedProfile> profiles = new HashMap<>();
+    }
+
+    private static final class TrackedProfile {
+        final PlayerInfo info;
+        final EnumSet<Action> actions = EnumSet.noneOf(Action.class);
+        boolean hidden;
+
+        TrackedProfile(UUID uuid) {
+            info = new PlayerInfo(uuid);
+            info.setListed(false);
+        }
+
+        void merge(EnumSet<Action> updates, PlayerInfo entry) {
+            actions.addAll(updates);
+            for (Action action : updates) {
+                switch (action) {
+                    case ADD_PLAYER -> info.setGameProfile(entry.getGameProfile());
+                    case INITIALIZE_CHAT -> info.setChatSession(entry.getChatSession());
+                    case UPDATE_GAME_MODE -> info.setGameMode(entry.getGameMode());
+                    case UPDATE_LISTED -> info.setListed(entry.isListed());
+                    case UPDATE_LATENCY -> info.setLatency(entry.getLatency());
+                    case UPDATE_DISPLAY_NAME -> info.setDisplayName(entry.getDisplayName());
+                    case UPDATE_LIST_ORDER -> info.setListOrder(entry.getListOrder());
+                    case UPDATE_HAT -> info.setShowHat(entry.isShowHat());
+                }
+            }
+        }
     }
 }

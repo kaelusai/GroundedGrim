@@ -90,6 +90,7 @@ dependencies {
     testImplementation(libs.packetevents.api)
     testImplementation(libs.packetevents.netty.common)
     testImplementation(testlibs.mockito)
+    testCompileOnly("org.jspecify:jspecify:1.0.0")
     testRuntimeOnly(libs.netty)
     testImplementation("org.xerial:sqlite-jdbc:3.46.1.3")
     testRuntimeOnly(libs.grim.internal.shims)
