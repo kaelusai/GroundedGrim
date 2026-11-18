@@ -183,7 +183,7 @@ public class PredictionEngineElytra extends PredictionEngine {
         }
         result.stuckSpeedMultiplier = stuckSpeedMultiplier == null ? StuckSpeed.NONE : stuckSpeedMultiplier;
 
-        result = result.returnNewModified(result.vector.clone().multiply(0.99F, 0.98F, 0.99F), VectorData.VectorType.InputResult);
+        result = result.returnNewModified(result.vector.clone().multiply(0.99F, 0.98F, 0.99F), VectorData.VectorType.ElytraTravel);
         results.add(result);
     }
 

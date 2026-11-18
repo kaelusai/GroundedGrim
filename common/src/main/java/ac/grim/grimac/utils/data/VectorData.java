@@ -139,7 +139,8 @@ public class VectorData {
         Flip_Use_Item,
         EntityPushing,
         WithInput,
-        BlockPush
+        BlockPush,
+        ElytraTravel
     }
 
     public static final class MoveVectorData extends VectorData {

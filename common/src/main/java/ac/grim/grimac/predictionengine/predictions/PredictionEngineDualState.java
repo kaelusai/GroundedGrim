@@ -19,4 +19,14 @@ public class PredictionEngineDualState extends PredictionEngineNormal {
         combined.addAll(elytra);
         return combined;
     }
+
+    @Override
+    public void endOfTick(GrimPlayer player, double gravity) {
+        VectorData candidate = player.predictedVelocity.lastVector;
+        if (candidate != null && candidate.vectorType == VectorData.VectorType.ElytraTravel) {
+            ELYTRA.endOfTick(player, gravity);
+        } else {
+            super.endOfTick(player, gravity);
+        }
+    }
 }

@@ -6,6 +6,8 @@ import ac.grim.grimac.checks.impl.velocity.KnockbackHandler;
 import ac.grim.grimac.manager.LastInstanceManager;
 import ac.grim.grimac.player.GrimPlayer;
 import ac.grim.grimac.predictionengine.predictions.PredictionEngine;
+import ac.grim.grimac.predictionengine.predictions.PredictionEngineDualState;
+import ac.grim.grimac.predictionengine.predictions.PredictionEngineNormal;
 import ac.grim.grimac.testutil.GrimPlayerFixture;
 import ac.grim.grimac.utils.chunks.Column;
 import ac.grim.grimac.utils.collisions.datatypes.SimpleCollisionBox;
@@ -25,8 +27,11 @@ import com.github.retrooper.packetevents.protocol.world.states.type.StateTypes;
 import it.unimi.dsi.fastutil.objects.Object2DoubleOpenHashMap;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayDeque;
@@ -140,6 +145,64 @@ class PredictionEngineTest {
         }
     }
 
+    @ParameterizedTest
+    @EnumSource(value = ClientVersion.class, names = {"V_1_21_4", "V_1_21_11"})
+    void endingGlidePreservesVanillaMomentumAcrossFollowingAirTicks(ClientVersion version) {
+        when(player.getClientVersion()).thenReturn(version);
+        Vector3dm velocity = player.clientVelocity.clone();
+        for (int tick = 0; tick < 12; tick++) {
+            velocity = levelGlide(rocketImpulse(velocity));
+        }
+        for (int tick = 0; tick < 3; tick++) {
+            velocity = levelGlide(velocity);
+        }
+        player.clientVelocity = velocity;
+        player.wasGliding = true;
+        player.uncertaintyHandler.lastGlidingChange.reset();
+
+        Vector3dm expected = levelGlide(velocity);
+        assertEquals(0, predict(new PredictionEngineDualState(), expected), EPSILON);
+        assertEquals(0, player.clientVelocity.distance(expected), EPSILON);
+
+        player.wasGliding = false;
+        for (int tick = 1; tick <= 7; tick++) {
+            player.lastInstanceManager.onPredictionComplete(null);
+            player.uncertaintyHandler.tick();
+            PredictionEngine engine = tick <= 4 ? new PredictionEngineDualState() : new PredictionEngineNormal();
+            assertEquals(0, predict(engine, expected), EPSILON, "Tick " + tick);
+            expected = normalAirEndOfTick(expected);
+            assertEquals(0, player.clientVelocity.distance(expected), EPSILON, "Tick " + tick);
+        }
+    }
+
+    @Test
+    void lastGlidingTickWithActiveRocketCarriesGlideVelocity() {
+        player.wasGliding = true;
+        player.uncertaintyHandler.lastGlidingChange.reset();
+        player.fireworks.addNewFirework(1);
+        player.uncertaintyHandler.tickFireworksBox();
+
+        Vector3dm expected = levelGlide(rocketImpulse(player.clientVelocity));
+        assertEquals(0, predict(new PredictionEngineDualState(), expected), EPSILON);
+        assertEquals(0, player.clientVelocity.distance(expected), EPSILON);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void winningNormalBranchStillAppliesGravityAndDrag(boolean activeRocket) {
+        player.wasGliding = true;
+        player.uncertaintyHandler.lastGlidingChange.reset();
+        Vector3dm expected = player.clientVelocity.clone();
+        if (activeRocket) {
+            player.fireworks.addNewFirework(1);
+            player.uncertaintyHandler.tickFireworksBox();
+            expected = rocketImpulse(expected);
+        }
+
+        assertEquals(0, predict(new PredictionEngineDualState(), expected), EPSILON);
+        assertEquals(0, player.clientVelocity.distance(normalAirEndOfTick(expected)), EPSILON);
+    }
+
     private double predict(PredictionEngine engine, Vector3dm movement) {
         player.lastX = player.x;
         player.lastY = player.y;
@@ -150,5 +213,20 @@ class PredictionEngineTest {
         player.actualMovement = movement.clone();
         engine.guessBestMovement(0.02F, player);
         return player.predictedVelocity.vector.distance(player.actualMovement);
+    }
+
+    private static Vector3dm rocketImpulse(Vector3dm velocity) {
+        return velocity.clone().multiply(0.5).add(0.85, 0, 0);
+    }
+
+    // Vanilla 1.21.11 glide physics for zero pitch and movement aligned with the look direction.
+    private static Vector3dm levelGlide(Vector3dm velocity) {
+        double fallingY = velocity.getY() - 0.02;
+        double lift = Math.max(0, -0.1 * fallingY);
+        return new Vector3dm((velocity.getX() + 0.9 * lift) * 0.99F, (fallingY + lift) * 0.98F, 0);
+    }
+
+    private static Vector3dm normalAirEndOfTick(Vector3dm velocity) {
+        return velocity.clone().add(0, -0.08, 0).multiply(0.91F, 0.98F, 0.91F);
     }
 }
