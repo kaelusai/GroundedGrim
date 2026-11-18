@@ -763,7 +763,8 @@ public class PredictionEngine {
         box.maxX += hiddenSneak.maxX;
         box.maxZ += hiddenSneak.maxZ;
 
-        if (player.uncertaintyHandler.fireworksBox != null) {
+        // Applying rocket lenience to coasting would turn it into acceleration carried into the next tick.
+        if (vector.isFireworkBoost() && player.uncertaintyHandler.fireworksBox != null) {
             player.uncertaintyHandler.boxMutatorScratch |= UncertaintyHandler.BOX_FIREWORKS;
             box.expandMin(
                 player.uncertaintyHandler.fireworksBox.minX,

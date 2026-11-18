@@ -7,9 +7,15 @@ import ac.grim.grimac.utils.math.GrimMath;
 import ac.grim.grimac.utils.math.Vector3dm;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 public class PredictionEngineLava extends PredictionEngine {
+    @Override
+    public List<VectorData> applyInputsToVelocityPossibilities(GrimPlayer player, Set<VectorData> possibleVectors, float speed) {
+        return super.applyInputsToVelocityPossibilities(player, PredictionEngineElytra.withFireworkBoosts(player, possibleVectors), speed);
+    }
+
     @Override
     public void addJumpsToPossibilities(GrimPlayer player, Set<VectorData> existingVelocities) {
         for (VectorData vector : new HashSet<>(existingVelocities)) {

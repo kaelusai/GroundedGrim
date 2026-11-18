@@ -5,6 +5,7 @@ import ac.grim.grimac.events.packets.PacketWorldBorder;
 import ac.grim.grimac.manager.CheckManager;
 import ac.grim.grimac.manager.SetbackTeleportUtil;
 import ac.grim.grimac.player.GrimPlayer;
+import ac.grim.grimac.predictionengine.predictions.input.impl.ModernInputTransformer;
 import ac.grim.grimac.utils.data.PacketStateData;
 import ac.grim.grimac.utils.data.packetentity.PacketEntitySelf;
 import ac.grim.grimac.utils.enums.Pose;
@@ -36,9 +37,10 @@ public final class GrimPlayerFixture {
         when(api.getSettings()).thenReturn(new PacketEventsSettings());
         when(api.getNettyManager()).thenReturn(new NettyManagerImpl());
         PacketEvents.setAPI(api);
-        // Startup feature gates must not depend on which test first loads Reach.
+        // Initialize server-version gates before tests select a packet version.
         try {
             Class.forName(Reach.class.getName());
+            Class.forName(ModernInputTransformer.class.getName());
         } catch (ClassNotFoundException e) {
             throw new AssertionError(e);
         }

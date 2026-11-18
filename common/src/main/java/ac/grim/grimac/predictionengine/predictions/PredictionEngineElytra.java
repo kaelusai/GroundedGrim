@@ -12,6 +12,7 @@ import com.github.retrooper.packetevents.protocol.attribute.Attributes;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -95,6 +96,25 @@ public class PredictionEngineElytra extends PredictionEngine {
         return rawMaxFireworks;
     }
 
+    static Set<VectorData> withFireworkBoosts(GrimPlayer player, Set<VectorData> possibleVectors) {
+        if (!player.isGliding && !player.wasGliding) return possibleVectors;
+        int maxRockets = cappedFireworksForBoost(player);
+        if (maxRockets == 0) return possibleVectors;
+
+        Vector3dm[] looks = {ReachUtils.getLook(player, player.yaw, player.pitch), ReachUtils.getLook(player, player.lastYaw, player.lastPitch)};
+        Set<VectorData> expanded = new HashSet<>(possibleVectors);
+        for (VectorData base : possibleVectors) {
+            for (int n = 1; n <= maxRockets; n++) {
+                for (Vector3dm look : looks) {
+                    Vector3dm boosted = base.vector.clone();
+                    for (int i = 0; i < n; i++) applyFireworkBoost(boosted, look);
+                    expanded.add(base.returnNewModified(boosted, VectorData.VectorType.Firework));
+                }
+            }
+        }
+        return expanded;
+    }
+
     @Override
     public List<VectorData> applyInputsToVelocityPossibilities(GrimPlayer player, Set<VectorData> possibleVectors, float speed) {
         List<VectorData> results = new ArrayList<>();
@@ -109,22 +129,17 @@ public class PredictionEngineElytra extends PredictionEngine {
             Vector3dm[] fireworkLooks = hasFireworks ? new Vector3dm[]{currentLook, lastLook} : null;
 
             for (VectorData data : possibleVectors) {
+                addElytraResult(results, player, data, data.vector.clone(), currentLook, VectorData.VectorType.InputResult);
                 if (hasFireworks) {
-                    for (int numRockets = 0; numRockets <= maxFireworks; numRockets++) {
-                        if (numRockets == 0) {
-                            addElytraResult(results, player, data, data.vector.clone(), currentLook);
-                        } else {
-                            for (Vector3dm fireworkLook : fireworkLooks) {
-                                Vector3dm boosted = data.vector.clone();
-                                for (int i = 0; i < numRockets; i++) {
-                                    applyFireworkBoost(boosted, fireworkLook);
-                                }
-                                addElytraResult(results, player, data, boosted, currentLook);
+                    for (int numRockets = 1; numRockets <= maxFireworks; numRockets++) {
+                        for (Vector3dm fireworkLook : fireworkLooks) {
+                            Vector3dm boosted = data.vector.clone();
+                            for (int i = 0; i < numRockets; i++) {
+                                applyFireworkBoost(boosted, fireworkLook);
                             }
+                            addElytraResult(results, player, data, boosted, currentLook, VectorData.VectorType.Firework);
                         }
                     }
-                } else {
-                    addElytraResult(results, player, data, data.vector.clone(), currentLook);
                 }
             }
         }
@@ -134,8 +149,8 @@ public class PredictionEngineElytra extends PredictionEngine {
 
     // Fork: one elytra candidate (optionally firework-boosted) routed through upstream's stuck-speed dispatch.
     private void addElytraResult(List<VectorData> results, GrimPlayer player,
-                                 VectorData data, Vector3dm inputVelocity, Vector3dm lookVector) {
-        VectorData result = data.returnNewModified(getElytraMovement(player, inputVelocity, lookVector), VectorData.VectorType.InputResult);
+                                 VectorData data, Vector3dm inputVelocity, Vector3dm lookVector, VectorData.VectorType type) {
+        VectorData result = data.returnNewModified(getElytraMovement(player, inputVelocity, lookVector), type);
         result.input = ZERO_INPUT;
 
         if (player.uncertaintyHandler.shouldSimulateStuckSpeed) {

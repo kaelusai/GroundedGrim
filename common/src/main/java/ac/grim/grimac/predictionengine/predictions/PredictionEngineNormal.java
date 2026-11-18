@@ -16,10 +16,21 @@ import com.github.retrooper.packetevents.protocol.potion.PotionTypes;
 import com.github.retrooper.packetevents.protocol.world.states.type.StateTypes;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.OptionalInt;
 import java.util.Set;
 
 public class PredictionEngineNormal extends PredictionEngine {
+
+    @Override
+    public List<VectorData> applyInputsToVelocityPossibilities(GrimPlayer player, Set<VectorData> possibleVectors, float speed) {
+        boolean climbingStopsGlide = player.isGliding && player.isClimbing && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_5);
+        if (climbingStopsGlide || (player.wasGliding && !player.isGliding)) {
+            // A rocket can change delta movement before the client switches to normal travel.
+            possibleVectors = PredictionEngineElytra.withFireworkBoosts(player, possibleVectors);
+        }
+        return super.applyInputsToVelocityPossibilities(player, possibleVectors, speed);
+    }
 
     public static void staticVectorEndOfTick(GrimPlayer player, Vector3dm vector) {
         staticVectorEndOfTick(player, vector, vector.getY());
