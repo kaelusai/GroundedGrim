@@ -6,12 +6,15 @@ import ac.grim.grimac.platform.api.player.PlatformPlayer;
 import ac.grim.grimac.platform.api.player.PlatformPlayerFactory;
 import ac.grim.grimac.platform.api.scheduler.TaskHandle;
 import ac.grim.grimac.utils.anticheat.MessageUtil;
+import ac.grim.grimac.utils.connection.ConnectionUtils;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.event.UserDisconnectEvent;
 import com.github.retrooper.packetevents.manager.server.ServerVersion;
+import com.github.retrooper.packetevents.netty.buffer.ByteBufHelper;
+import com.github.retrooper.packetevents.netty.channel.ChannelHelper;
 import com.github.retrooper.packetevents.protocol.ConnectionState;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
@@ -601,13 +604,36 @@ public class PacketStaffListSpoof extends PacketListenerAbstract {
     }
 
     private static void send(PacketSendEvent event, PacketType.Play.Server type, PacketWrapper<?> packet) {
-        // Silent sends use the same wire format as the packet that triggered them.
         ServerVersion wireVersion = event.getServerVersion();
         ClientVersion version = wireVersion.toClientVersion();
         packet.setServerVersion(wireVersion);
         packet.setClientVersion(version);
         packet.setNativePacketId(type.getId(version));
-        event.getPostTasks().add(() -> event.getUser().sendPacketSilently(packet));
+        event.getPostTasks().add(() -> sendSilently(event.getUser(), packet));
+    }
+
+    private static void sendSilently(User user, PacketWrapper<?> packet) {
+        ServerVersion serverVersion = PacketEvents.getAPI().getServerManager().getVersion();
+        if (packet.getServerVersion().getProtocolVersion() == serverVersion.getProtocolVersion()) {
+            user.sendPacketSilently(packet);
+            return;
+        }
+
+        // The pre-Via handler is after ViaVersion on outbound writes.
+        Object channel = user.getChannel();
+        String encoder = ConnectionUtils.PRE_VIA_ENCODER_NAME;
+        if (!ChannelHelper.isOpen(channel) || ChannelHelper.getPipelineContext(channel, encoder) == null) return;
+
+        try {
+            packet.prepareForSend(channel, true, false);
+            ChannelHelper.writeAndFlushInContext(channel, encoder, packet.buffer);
+            packet.buffer = null;
+        } finally {
+            if (packet.buffer != null) {
+                ByteBufHelper.release(packet.buffer);
+                packet.buffer = null;
+            }
+        }
     }
 
     private static boolean isHidden(UUID self, String member) {

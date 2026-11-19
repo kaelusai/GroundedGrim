@@ -6,6 +6,7 @@ import ac.grim.grimac.platform.api.PlatformLoader;
 import ac.grim.grimac.platform.api.player.PlatformPlayer;
 import ac.grim.grimac.platform.api.player.PlatformPlayerFactory;
 import ac.grim.grimac.testutil.GrimPlayerFixture;
+import ac.grim.grimac.utils.connection.ConnectionUtils;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.EventManager;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
@@ -31,12 +32,17 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTe
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams.TeamMode;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelOutboundHandlerAdapter;
+import io.netty.channel.ChannelPromise;
+import io.netty.channel.embedded.EmbeddedChannel;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import java.security.KeyPairGenerator;
@@ -67,6 +73,9 @@ class PacketStaffListSpoofTest {
     private final Map<String, Component> prefixes = new HashMap<>();
     private final Map<String, String> memberships = new HashMap<>();
     private ClientVersion version = ClientVersion.V_1_21_11;
+    private ClientVersion serverVersion;
+    private EmbeddedChannel channel;
+    private int viaWrites;
     private PlatformLoader originalLoader;
     private int profileRemovals;
 
@@ -76,12 +85,15 @@ class PacketStaffListSpoofTest {
         EventManager manager = new EventManager();
         manager.registerListener(listener);
         when(PacketEvents.getAPI().getEventManager()).thenReturn(manager);
+        when(PacketEvents.getAPI().getServerManager().getVersion()).thenAnswer(call ->
+                (serverVersion == null ? version : serverVersion).toServerVersion());
         when(user.getUUID()).thenReturn(viewerId);
         when(user.getClientVersion()).thenAnswer(call -> version);
         when(user.getPreViaEncoderState()).thenReturn(ConnectionState.PLAY);
         doAnswer(call -> {
             PacketWrapper<?> packet = call.getArgument(0);
-            assertEquals(version.toServerVersion(), packet.getServerVersion());
+            assertEquals(PacketEvents.getAPI().getServerManager().getVersion(), packet.getServerVersion(),
+                    "The normal PacketEvents sender takes server-format packets");
             assertEquals(packet.getPacketTypeData().getPacketType().getId(version), packet.getNativePacketId());
             ByteBuf buffer = encode(packet, packet.getNativePacketId());
             try {
@@ -111,12 +123,70 @@ class PacketStaffListSpoofTest {
 
     @AfterEach
     void tearDown() throws ReflectiveOperationException {
+        if (channel != null) channel.finishAndReleaseAll();
         UserDisconnectEvent event = mock(UserDisconnectEvent.class);
         when(event.getUser()).thenReturn(user);
         listener.onUserDisconnect(event);
         PacketInfoSpoof.setNoSpoof(user, false);
         PacketStaffListSpoof.reload(mock(ConfigManager.class));
         GrimPlayerFixture.set(GrimAPI.INSTANCE, "loader", originalLoader);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"V_1_21_11, V_1_21_4", "V_1_21_4, V_1_21_11", "V_1_18_2, V_1_21_11"})
+    void translatedVanishPacketsStayOnTheClientSideOfVia(ClientVersion server, ClientVersion client) throws Exception {
+        serverVersion = server;
+        version = client;
+        setupTranslatedChannel(true);
+
+        team("staff", TeamMode.CREATE, STAFF_NAME);
+        update(EnumSet.of(Action.ADD_PLAYER, Action.UPDATE_LISTED), player(staffId, STAFF_NAME));
+        assertEquals(PREFIX, prefixOf(STAFF_NAME));
+        assertTrue(profiles.containsKey(staffId));
+
+        setVisible(false);
+        update(EnumSet.of(Action.UPDATE_LISTED), listed(staffId, false));
+        assertNull(prefixOf(STAFF_NAME));
+        assertFalse(profiles.containsKey(staffId));
+
+        setVisible(true);
+        update(EnumSet.of(Action.UPDATE_LISTED), listed(staffId, true));
+        assertEquals(PREFIX, prefixOf(STAFF_NAME));
+        assertTrue(profiles.get(staffId).isListed());
+        assertEquals(0, viaWrites, "The client-format packets must bypass ViaVersion");
+        verify(user, never()).sendPacketSilently(any(PacketWrapper.class));
+    }
+
+    @Test
+    void translatedPacketsDoNotUseTheNativeSenderIfViaContextIsMissing() throws Exception {
+        serverVersion = ClientVersion.V_1_21_11;
+        version = ClientVersion.V_1_21_4;
+        setupTranslatedChannel(false);
+        team("staff", TeamMode.CREATE, STAFF_NAME);
+        update(EnumSet.of(Action.ADD_PLAYER, Action.UPDATE_LISTED), player(staffId, STAFF_NAME));
+
+        setVisible(false);
+        update(EnumSet.of(Action.UPDATE_LISTED), listed(staffId, false));
+
+        assertNull(channel.readOutbound());
+        assertEquals(0, viaWrites);
+        verify(user, never()).sendPacketSilently(any(PacketWrapper.class));
+    }
+
+    private void setupTranslatedChannel(boolean hasClientSideContext) {
+        channel = new EmbeddedChannel();
+        if (hasClientSideContext) {
+            channel.pipeline().addLast(ConnectionUtils.PRE_VIA_ENCODER_NAME, new ChannelOutboundHandlerAdapter());
+        }
+        channel.pipeline().addLast("via-encoder", new ChannelOutboundHandlerAdapter() {
+            @Override
+            public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
+                viaWrites++;
+                ctx.write(msg, promise);
+            }
+        });
+        channel.pipeline().addLast(ConnectionUtils.POST_VIA_ENCODER_NAME, new ChannelOutboundHandlerAdapter());
+        when(user.getChannel()).thenReturn(channel);
     }
 
     @ParameterizedTest
@@ -306,6 +376,16 @@ class PacketStaffListSpoofTest {
         ByteBuf buffer = encode(packet, type.getId(version));
         try {
             PacketEventsImplHelper.handleClientBoundPacket(null, user, null, buffer, false);
+            if (channel != null) {
+                ByteBuf injected;
+                while ((injected = channel.readOutbound()) != null) {
+                    try {
+                        observe(injected);
+                    } finally {
+                        injected.release();
+                    }
+                }
+            }
             if (buffer.isReadable()) observe(buffer);
         } finally {
             buffer.release();
